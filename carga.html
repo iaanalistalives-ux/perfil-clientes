@@ -1,0 +1,1399 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Carga de clientes · LIVES</title>
+<!-- ===== lives-cargando v1.2 · 2026-10-12 · aviso "Cargando datos…" cuando la pantalla abre VACÍA esperando datos.
+     Va al inicio del <head>. Al terminar de leer la página (antes de que se vea) mira si hay contenido: si está vacía
+     (menos de 120 letras visibles) muestra de inmediato el logo, el círculo y "Cargando datos…", sin dejar ver la
+     pantalla a medio armar; se quita en cuanto aparece el contenido, cuando terminan las consultas a la base, si en
+     1.5 s no hubo ninguna consulta, o a los 15 s. Si la pantalla ya tiene contenido (formularios, pantallas con su
+     propio aviso de carga) no aparece nunca. ===== -->
+<style id="lsCargaCss">
+#lsCarga{position:fixed;inset:0;z-index:2147482000;background:#F1F6F4;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;font-family:Calibri,Arial,sans-serif;text-align:center;padding:24px;
+  transition:opacity .25s ease}
+#lsCarga.lsFuera{opacity:0;pointer-events:none}
+#lsCarga img{height:34px;opacity:.82}
+#lsCarga .lsGiro{width:38px;height:38px;border-radius:50%;border:3.5px solid #DCE5E2;border-top-color:#0F7A5A;
+  animation:lsGiro .9s linear infinite}
+#lsCarga b{font-size:16px;color:#0E3B36}
+@keyframes lsGiro{to{transform:rotate(360deg)}}
+html.lsDecide body{visibility:hidden}
+html.lsDecide{background:#F1F6F4}
+@media print{#lsCarga{display:none!important}}
+</style>
+<script id="lsCargaJs">(function(){
+  'use strict';
+  if (window.__lsCarga) return; window.__lsCarga = true;
+  /* Mientras se lee la página no se dibuja nada a medio armar; se decide al terminar de leerla (máx. 2.5 s). */
+  var raiz = document.documentElement; raiz.classList.add('lsDecide');
+  var soltar = function(){ raiz.classList.remove('lsDecide'); };
+  setTimeout(soltar, 2500);
+  var pend = 0, visto = false, listo = false, el = null, tCalma = null;
+  var esBase = function(u){ return /supabase\.co|\/rest\/v1\/|\/functions\/v1\/|\/auth\/v1\//.test(String(u || '')); };
+  /* ¿La pantalla sigue vacía? Cuenta solo letras visibles de verdad (sin menús desplegables ni avisos comunes). */
+  function letrasVisibles(){
+    if (!document.body) return 0;
+    var n = 0, w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null), t;
+    while ((t = w.nextNode())){
+      var p = t.parentElement; if (!p) continue;
+      if (p.closest('script,style,select,option,noscript,#lsCarga,#lsAct,#lsMud')) continue;
+      var x = t.nodeValue.replace(/\s+/g, ''); if (!x) continue;
+      if (!p.offsetParent && getComputedStyle(p).position !== 'fixed') continue;
+      n += x.length; if (n >= 120) return n;
+    }
+    return n;
+  }
+  function vacia(){ return letrasVisibles() < 120; }
+  function crear(){
+    if (el || listo) return;
+    if (!document.body){ setTimeout(crear, 30); return; }
+    el = document.createElement('div'); el.id = 'lsCarga'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite');
+    el.innerHTML = '<img alt="LIVES" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAXEAAABgCAYAAADrekIuAAAe20lEQVR42u2debwcVZXHv1XvvSwkQoIICZusAQmggCzDDi6fGVERGUVBDC6ALIEBwQG3Ef2oo6ggi04EcQRHQUFEccONUWQQEYjKvq8BSSBA1vded88f55xP3Vf09qqrq6tfzu/zqU8n/bq7bt177u+ee7YLDofD4XA4HA6Hw+FwOBwOh8PhcDgcDofD4XA4HA6Hw+FwOBwOh8PhcDgcDofD4XA4HA6Hw+FwrLGIJvCz1Hx4HQ7HRMdAn5J1rFe7zxj7UDscDtfEewsj4mrq/SFgOjAVmARUgBV6rWxA6lXX1B0Oh5N4ceQdEve6wFxgC2BtYBqwDBgMiH41sJYS9YvAk8DdwH1O5g6Hw0m8uLZFAYHvDeyq2vbDwL3A48Czqn3Xw3RgNjAH2FKJ/X7gemBxg0XC4XA4nMRz1L4PUAJ/CvhfJe9GhG+oNdCwZ+hv7Qw8AVyti0Dc5DsOh8PhJD4ODKhmvSEwD1gKXAX8I2hzSLq1Np7RzCyhxv46YD/gL8A1wWedyB0Oh6MDAgfYF/gs8OrU3/JYdOLgdyYBHwDOAF4W/N3hcDgcGQn8EOAjiP06T/KuR+aG3YH/BDbtMyKPmlwTYZfY7WeL2rwc4+uvIq4in3lAr8E610BKMVzjCfxdwAkNiLbb994MOFtfXSN3pCdyP7U1TToDPoTjVvAGM4y79Xm8pgmn2cAPQiJIzqP48L/QDv9h1cqfodw28rhB++y9fo64GQhkoN6zjeZwjyl1+indn5Hey6OXyrUQRDpfa114xrRMvALYCtiEJMLN7r8IeACJknsQCW1O91dlopO4RaHsAPwr8B/0LlLEiHxb4AjgLG1DpYSTqQJ8Hng7MExicqrqvx/VRXGE/nLW2rMdDXwUWKWajcnDgE6cAzt4NpO5vYDLdeJFdeZEVe/9FPB6YLm+X9a+tL6YqYrQZF2AYiTx7SQknyKrPPxA52klpWlGOXDPeNpjcnA4cAv5hAinw5lfDbxNx32u9mkzVJTIbwWuA36BhEGHO/oJqwjESLLOF5Eknl4vLLZ6vgV4f0nNKtbG7zA2Qie8HkOctv1mChjU19ObPNvTOTybbZcXNrlPeB2Val+Z++6YOu2/KjCzZCXbW9vsq6KuvXPaIYTz+wDgWlUQwnsNq0KxWv9m17C+N5r6/IvA94H964zPhCNwgGORcL+ybNmsDZ8AtikhkVv7vqkawGp9rahgVZBY+n4m8VOaPNvDOTyb3eewYJJW6lz2vml8ZfaTRPpctyuprArIZ24H88v6+I+pPgmv0RS5dfMa1tc9c+AM++66Op/SxL16nAvLiPZ3+N41uoMxHpkwDlDbvrwS+FTJbG7WyZsDHy8xiV8SCE4tMP3UkPICQ31O4o2e7dEcSNzkbwpi06wGv5++7P0DSian9WTiDUGbTTv8aYcybH38fyT+iDJo4vt0OB72vV1U6amlFiS7zxLVqo9XZXMukgE+F3ijKqHfAP6Wat+qQHZWIL42usEnvVLxY33AtwI/KZmt0WxuDwEvqH1sIf2Vnt/vq31UwBgP6kT7OhKVVGkwuar6/nzgd5TTJm5tOjHVZoBzC+jTJWpCiGkv+a5G/dLR7djJbX4Od7joVdQkcy2wjpL3oL4/qCbJcxC/yaIGv3NHitN2B44E3o1kh9uiNxX4ErCbmuZW0uflPmygXq4mi7JpuqGmNgdxCJWpjWuCJv5vXdbEwzF+uZJQlSQiKrzs/WHE6R2VTF6tLdvo9r9KElHzlxy28M00cRufU5So1kaiN7p9TetAAw/7a0nqmez1EmC91JwLY8LtCsM4Q7wSuCjop1C7/7U+Q1+bVqzzDwIOLvEW1Tr4dFp7p53E+8ucku7LL9W5X60OWZ1XQnm1Pvty0FYjo3k57LjbIfET+kTWbAGeSuLUHkk918dSfRuN87fDvj4Eqc1k8jus/76a7I7mUmkOJwMblXjwrYPfjpQBKIs27pp4fiRu2tCWalqpNiBxe/85JG64LJmc1oZ1kKidWqCFP6Yaa6dtbYfET9TPDVHujE2bOxY+PJx6pgWBHMYdypXNv9cgYappIj8jL4WgF6RUDbZDT1LeOOZqYPfaog8JsZ8RFTjGMeLc/BFJck+99lQQO+eRJHbZsizohwHrBwtdpIS0nCSBpdso2rGZhesqqjieSpIHEMrAKSRJZtUO5WpEifx2xPe3MhizChLQsS1j/Rd9QeI2OTcK7FFlDdsyQXkcKY4V4Zl7E3nR+EoLeTRl4zgkkaZSgkXdCOBDgcwOIA75i11m63LdMcg5A1XGOlm/gkSR5NlnRuQ3I761OCD4ScAnqe/k7QsS34DkUIayT+7l2vHT8TK1ExFGxjcj9epNY6s3V6pICvbBJVBATGM8ENgpIJ4I+J5u4f3Ak7E7qSGS3IA4WPSWI/Hc3Vj0RlTjvxhxag4ioa0REsWyI40jo0pN4usqiZc9Jdy80COI591NKhPbfHNOm2M8P7Vb6yWOC7Ry26pf4HJadxf1Kl2EYWw45APIITHdqjlk2vangEeAC4F3IqUfnupUlgYL7MQ40HJipMCUPVwZyTzUyJ5GPNqhBuQaTu+Qt6zY1vrnwF00tlWafXlvJCb45oA4eyGbWyBRXrVgnl0H/L3JjqIfxqMb/VXVHcsASUy4tXsJL62fkvduD+BGYDs12+TWh93WxMNTeCx1ehIwC8mU2o7E818mzcEGcz3kKLdtkFrjMWOr2vVyO11rQ7OcqCQddeF+Ayqf57dQKmxCntRD8jK5+yCJfb7I5J5+xdwG79uh6rUC5HoFScx5LmclDHZZ0IygZykZbqr/3w4Jg5uCFJu6FMmKKoNGbu1+g7b5DiQhZA8l85VIiu2tjLVDlk0b8Uk8fm0pAv4Hqaa5fgtt/BAkqeMRirU9m313GvDe1PsLEbtrVPDuoF9kbb0Gi+HmSPDCiwXM5UYRUB2v6N0Y0KoK+TFIadcKkuK6ALE9LgEuA64A3kES+1sGAt8O2Br4grb5Mf33xcBN+vfTkVKVtsKWLcrGnbDZtPEXkBj8RltrI8ipSMncondktogcikR5VQJTwAUktnHHS+fC9AZjuT7iIKaAvst9XsZd+D1r5BF63Yxkk/0SCdeLkbokL1PyfkEnxFolIB5bgHZCiuLMRhJPHiRJZ75bF58FSJTNmbqSl2nyOIFng9nGF+iOq1GMtc2b96scFxluaG08LjABxLqTvaIHWng/YVWT+XJmv+5i45x/q4okRHxcJ8HnkGB3s42H2s0CpNbD0YgzZinliLuNdMHZBjmo4kbgZ8FgW7rs87r1vhx4j2rllQKJ3M0l3Rn/WE0kVzUhRHMazkaiDIpK/jGn+j8h5r1QFi5Wc0BRyT39BJsri5v06e5I9Ig5PaM1tZPWR1JadwzejyfQ89UTAHudj5wG0u0tmafdd7dWuvXvziT1sutlDJqD+68Ud65i+kCQYW3DCrp3yHe7affh+JVVro6icY0ce675wXP3hVkqznGQ19HBvEwFu955dfXun2ex/YGcJnaUaluzSAXT1s5HbJRvKlgjn8hKQS9gkR63Ar+lcaieyfcOugvrtjnN2rGJKgthWOHlurgN4KGvjXZYADeQHGfYyJJwHnLSmPV36bXyOMffmI+cw3c/7cfOVskn5joKJmAeTsbaONpWC0j/Qt2F7EyHWViOUiwirZJ/jEhPTv2/m3N1HhKZUglI+zzcvNaKZ2Llpj8EXFFPcasgQQu/B3YNNPTBss7nOIfvV4B3IWF3fyMprF7khLPJ81mS2PMiNeFaQOYXIJED6/ShOcMxdof1SyRsL2qhjb8B2J7u2cbt/lOADwQyFyMhhbfTW4dmP9jgbR5+juZhhJYMtKdq7uciUXajAa+UiszjDjulhkRmbI7UHrAOKHJgzGH6DaQGwgeR03iK1oSNxJdpXxxB4ih19B9sN9lKyzWNeH4XycwWi7cCmzHWXPdlVxbaXpgHEBPZRapsjjT4rFU3nKS7rIXaz1vr79i8Huj3fjeC/DBSjzkv88x4YA6LLwRb2tk6SJv2SLgHgn7pxkHLfihEMYdAW+z1dCRPoNE5nGZyewHYsEvzwH7ver2nHeB7K90/IaYdx+Z8bcckxvqS8rzyVPqmqLkkrCneqI58+LzLkMTEverMyZ5p53EH36sqSY0gBWSKdqqY1n+Uvn4VSUFehJzUciZJtbAiicxW6WuQuhZr8ha2n5/NTCPLdJfXLPmnisSLz+vSom11P/ZhrM/nXMqRnzBCcoRdtUtXnnK1Cngz8CtVdipNxnYgWLymIfXkb0DOWz1CF/lKMA6Fj0WnIUH7A7+h+LRzW0TmAPupCcUOTx0A7kHsmR9SQS+ySJFNsvv1/xsjSU5F91E/b/PK0nZbkC8CTlOirlfnx8b2GJW3VV0Y7+NUroZV430UuJLe2sLD8wG21XZVGvRNszEO+7TWYCG7j+RghU7HNNad05uQOuIWVjjawEQSkRTMsu/vr9fDSMjnZUiCYKjxV8uubK2NeHF7cVSVaSJfQhyZae3HVsPP0pvDbW2Lux/i9CXHFbodc8r9bk7J3Xz1dZqfw2nb7iNyUpBCmd4ASYarBtv/j+Z4n6zmlHBsRkni6vO+LJQzz11OyFsH6yIRmomqND9ZaDTVFyuRUM/XNZCfUplT7Ds76ISq9YAgq8i5l4uAO+uYcmz1+zYSKVL0amgCcBtimy/6hBXP2Mu3LyMkD2CU1hmRJ5NfGVibV0ci0U6juji/CPy3/q0MKfZ28nuZ7eGN5sgAYvp8LfBpJBPbYsNHaR7FYrwziphuD0OihW5ADnwwC0BXlcgsP2yr1xykjkivSGN/XfnqEaRtee7VTtyS4iNFbMu2CnG2lq3crmN82+87kWJozcINq0hs8b45aMl2n8lqpgnn2ZXI+bRFptjXWvTRaJevWpeeyaJWnkeqV74G8a+9EJB5pYkSFgemFts17AV8F6kb9a7ADNOVaJY4o1ADzERqTGQl8ShYzcIrprHH3Qh7K9VGnqC57THSVXGfFs8bBdpEvSvK+HwgB0r4QcsTYydxTgs5srkxn87rU1um8JtIQtuG9B4X9kCWohZtHSzg6hYqAR89jJR9eA0S9bYo4KUwQqkRn0XB53ZGjsr7LVLrJq9kxDEYzDjBpmpjn+9g0tXa2AqmHQS2Td0FCa+K2lhsbkMKBqU19jhYZbtREN5+bxHwCifxvoblHPwBKYi2J/VLK5hmfJAS7/1krzVu8nNiSmO8HvgLxZ7c02iO2y7lO0ikR7NEv3qOy6jFPaLgtROFcTx8ZLzwEHAGcDZwOPA+JELIMNpEwYuD/qkBB6gyebZq+8PkGGwxXhI3rXcGYsivdSCkmyNOxxm6KNSQZJ3ngX8gER3PBA8arl6zkKiYVuQb62+u0u8sCjrP2jwZqUexIXL4wxTEcVbT761CDoZ4gGwRB4tJ4ujLoDU5smvGo0j0yZ5N+n1UZeo44FSy+50srHD/YIEAsc2XZYyrweJ26QTZpYWndsXIuQfn6+7njUjG7EEkxzU2s3nHKSXgDORovyNIat10TORZtyjTgptH4yQXWwROQ5wAjwcLwiQk6mUuEtkR68P+UQkYksLui8dBZs8gDsangg7dA6lzMh3x/D+npo/lOhEtrGhbpNTsWePUfkzYVgYDvqabI/pdG4+AH6uGvSXNT/6Zh6R4L8mg6JjcnkASVjiEhM7+lOId5a3m+fTA5DHaxf4vUq4tPj2sqfILveYg+SlHIiHErcjcFuARJfEb1Ez29zyIPCuJxx2YUKyD7gGubvH5dVUbORJJurhSNePVjO9g06UqaFbnYlddPK5HQouadeJKOg8T6oY9z4m6+IVxUGXvfMT5VW2ija+rW/CzGV8iXL1a5bbFX6CE3k2yzCJvlaA9oxNw3CspMr4XCfE8G3FcHkcSAhmaZNIY0v7ZBDlDYT/ln46O9+u0dkpWWPH6l1E/pMhsTc+q2eSLiB1wnk6MJbTnILDPPIE4F49Hitl8Tbd/dwedng6RGtLXbYNdQFbi7IZgu8mkd9r4pboTbKTM2PsfIjnIOBrnnJyn88MOKXgWSSjpVXKPy1sSt26O3OeQ/IHX6m59YcBdlSYK3agu0j9Uq0ZH/ZuVxJcH3x0vsdl2czni8DPjf5hia1unsK73n5DknlhtU3Ebk8NWuE2Rms/XISegLGWsU8LumW5DVTv7gQ5IfGgCaidrsjY+oPJzMc1P/qmq4nAw7Vc3DMMKP5iSuct04SjjyT1r2q7QQirN5DqMnPK1GxKZtLiFmcSKb22PJCRWO1Go44yD9TxJ1lzWAXyI1gWiQnI34f2mduDxNC/Ybo6oXRFHwiWILXNSmza2qk6mKYhdfrxOTWvXTF2xfeJMnAkcqQa2ogWphifFtLNdtt96C2Jzt7DCYb1fL2zhjuZz0Mjcyn5cgIQW/rQNIq8gfo9X0UHV1U408UGyHW4chv7NGQchWWdMQhwDt+gEqVcAyDShXZTErYBRu1tRs2ltr6aULB1sJL5BQOJ5Eu9E3t6W+dlMa3oUOQSlVa3xvZBolna0cZsbx+urEcQvEB9SR7ZTN7V0lcwrgWb+GFJg6xwal+c2pXAQOKkTPs7yJRPOF5HCN+MdRLNTL9YtxZa0n81odvLZwE3aWYemSNZ+Z13920VKpE/Rfjy4dfBuSM0IOpg8s+lOjKtr4r3HV1ss8Ka1n9TGeNm82hlxeNkEhySs0NEfmrmZgE9VIm8UP29y81bENj6aZUHsxLH5KOL068Qs8ysk1KbdLCbTRJ7Ve/9AtyKbBAuBbTkPR9LyR3SxebBNMjbNagu938Nki8ax8/lm5EzikWs/PYcR9220dw7nwSpPrXZ05gyNVW4Hgnv0slphK9l1heKli7ctwqfqTqqeacV4ZXYHXNpR2v1CJCstyyAaad+HhGy9tk2Thd3nDpLsqauAQxibeDRX//ZXxKm5GqmFEI+jTw4lqZVRy9CvEWLzX0rjw1k7mUw+cXqLsKZ3o0U1PFbt+CZzzj43CymiFH7ua5SjZrhj/PPUuPIYxI9YTxm03dpWWZWzOGPjYpKwu43IVtzJfue7SAbUTFp7ae2BrTrgWsBd+t5mwUp3IPAz/fc+iP28Hdi25xDE8fpIRhK37+yBFMHpBum6Jt5b2NbXzuFsZK82bfy9uiurF1FlBH0kkuw2orL4JHBFCbTwVvJWdlksqjJiPb4yG/mFDcbReGFWp9pEVtyIhPtlKepijV+GFIk5QTWWVlpHpJrtbSQn5/yJpMjVhtpxDyIhjBsBf6a1U8jiN/fWBeFKsp1WZOacGbpNWkh3ogpcE+89wnM4G42Jjf0rlMjrOTgriMM+HVb4LZKcCh/vzsi0GycFtXvvCCkdPNxkLDOHIccdNuxmxB79crKVeg1Lxv4EScWfFZhW4ibf+TViZ3ylatqb6N93IimRO09NItU2+mAUKei+d7BqVjP2qdlBb8QPS57IMK36+0gGcCNFwXZmx5IcB5bW1P8ZidaysMLlSFQVeFhhJxhCzL5z9HUbkvN3iyJxkPDmO+vs7I0bFmdVzjrN2Kyq2eI9ZC+xaKS8ULeORyPe+bB2QbpamEWZXEZSX+IJJfSNEYfp4YhT8s7U5ArLztr9JyOFbeYgqbTDGTvUtksbq6D8jvKGhTny2Q3ZOZwLmiz8JgPbkTjyB1MydkLKTHMNSZGkakmetZ9gfDEVKa9xl3LB3ap8rl2gKcgUu4fq9KVx5iO9MKcY+d6ijWpUnnM8v3UfkpW5NXL0206MLbYeClSM2AwvBz6JhBDuqSva+1SjvzKYLGEpTMvInKwa0Ed0wnw90K5qHfTnB9REVCtASB2918ZBQlmfp72Tf0zmjaDnIn6cmmqONSR80ce4s0XHDmYxc6otshsAu1PssY0REmCRbqOFTd+Tddc1mFNHXQx8XFeaRRm1T9O6V+rvbYGkyh+oGvU9umV9ISBhkLriU5XIVyH1Jn6uGnXa1jSAOFA3U61olq6A5yK2x04ONzWb+vt1V9FJLWlH/2njTyOp18eT1DshJXtV3WXugtQCsoOFjyMprjUZSWa7meJrhk80Ld3m349Jyh8YZx2pO/ai+qfGS52Xprz+GUkIzFTRcDCnwVuhmsjJwOdJwmmqGX8vRhyT39Btzw4q+PuS2BRtFZus2vfdSFLFX5XsTyE5vNU+O0knyvNIGcjvIZEAdEi4RuBvQ6olXkKORd/XQER92ubzEefkEPUjtixa4STEXzOK+JPSh2lf2Gf9UNZ22ny+Fgn1XScg1ENV8Xuky8qW7epnIqWv0xaQCDEj97wfrVGvVg14vZRQZn34et8fQrKbZiIRIBHi1DxZB+U0JEQQHbQN9Fqb5AT4tIYUddBGe/a3A/+eg5mqFdo97X5SnxFBqFScSnlOux/vuPywTtvtMj/PMt0Nhtmcdor9gyQnZ5Xh+Zqddm/PeFJOSmE3ZeqCoM32DN8NOKXb9z8q1X9WYO8J5aZSjLcR1/ZI6dhXBe/HOfx2I7LdUe+3uZoyZunrsS0WhzinSQtiA/9w8PtRAWTRisSHnMR7QuL7ptqbvuyZztLP36X/X62vHysZIfY7iZstfFNdPK2crD3He7pI5MZ9ayH+vrBCq/Xd/LL1nRHjBsCnkaL25EjmIZEPIHG3nwg0/1OQCBXTjM9i7NFonZ42nd4dbAp8KtgORwWSxUQm8VP6kMRD+f8DSbnSNImbBnYHSaZxJdDQNy5gN5eFxG9sQuInl5jEwzlzetBuI9QVSFgxKldRjrKQnqujqdebSM4tiMooyJGS7FlIWn26U1s1PGqiNe8NfAZ4R+rzJyqJ2+9uixxMOk9NK/W08VZtiOu0Ybqu4J/WnUeRk84E45stSHyqTqohijmJPI8J3O8kbu0/pA7hpa9R5HCTavCc38rBDNkLEj9Fn31KgbIWj/MZbA7/MjBfWRDDUiSIwj472IFsxam58NVUX1n/LQkUzJgSIuyAzXR7fCZy6OvUNr+XxgzgX5AomONJPL2hdjw/0MTDifBm1ZiPQqJeWi0cjbApUpv8M4i3mx4MQjua+F30J/qdxE1+hpCY5GZmlXq28t1o7AsqM4kf0weyZWOzLnB7QOSheeOjgWzZXGum7IWKZnphmYPk0IR9Zv31IhKllMuC3a3tTy1o4MPAV5TMD0TS4xcjWZqPkBxOHIb2DSKhghvqarUF4sy8D4mCeTogz0YhgWGm5LVI2OG+SASJ1TO4F3EsPBfYJAm2VjO0DVsHGv7tSPz56lQbyjThZujEquREdLUmC61FYaxEMhdHWHNhSTwjSNjqAlpX/wtPjO+nsMJQFvbT+TCJ9ss9Z4X11wNIEk+7OR0WWvgskhtyNVLbyOzjg8gpO+8Evqx/X9ZgZx6OHanxmov45I5WDrM5aFVNH0WKnN1EThFsUUEDHWay2QnyWylBTk915AgSNjii9qrHkfDBB1MrZEjeRqTzkZjQdOGqNNGuh8SJb64dPQ2JMTeb+YjuGFYicemPqHb7VEr77gV528BfgiQ1jZbEFrkc8YUsJ3uylIVqnqILf/hsNnkfU9kZ7uA+RRDbNCS3YTbNs5ktQe4wXQR7cQhyq+epIY7NPcie0Jc3rkB8UePtL5u3a6mMHRuMQyXQxB9TTfo6JO9jkfJR+rdmqta9m1oKDgh+Y4SxtvGrEZPvk+QYglzE5K8x9rzMUSRG++8prXcyyRFHq2lcn7ma4eGrKbPHYuD3epmgTtbLMqtW1yHpOPi9Xmvf9bblaXIoqh2R2vjy/M10saL0a9m18WXAfyF+k5EGc80I8QFVPspQrbCVvNWrBVRNvV+rswjUWxga1RGpNfmMabRLO9TkVyC123+E+M32IMm2HUHClo/Va7XK92O6a68qZ81CCuzNTP2+JW1ZcMHtquVfmVLE+hpxYG+KmmgArT6TJtfQJp7FYdmoDWXyHtuqfimtba1FXs/Q+cndRnSnNbnP05Q/Bt7kZX0l81Z9d0aBSlXWncUtJZO3b3XYZ6HvIULONb1Wd+TpaKJWbQljz+0aBn4DvDsg867wSK+Eph1tqpZhtaqN43O1LrWhKCxV885Ij7e3ptk8k5O2h2o7DwXPFgX3WUT5izFZW/+hW/aDdZIP1NE2VwHfpvyHID+lZoDRBvLWSd39epo4TcxPk+j88PFasBOqIFVUf4L4v16v146IybUdHjWn++3ISUzXMTbAoGva90QpsGN2rpOQ6m9ZD3PoJ6ylwlxtYuJotlXtxHSSJl2717Kc+nwwmBj1sLpPxmgiyeA0mhf3KvJZY9V0V+a8w62l5tMkJG5/jppNNkT8aUO6mD2ji9sSxP/xMOITSu/4q93sm0EmFiqsOcXzV/BSR8tEwSjlcu51ou21Ird2tM8yYPkEn0+VYIGIA5PIg4wNqmhngTHizuK/W2M1ccM6KmyjTHyUcexqBT2fn3Lj8laEHESpqxlM23bZdDgcDodrCw6Hw+FwOBwOh8PhcDgcDofD4XA4HA6Hw+FwOBwOh8PhcDgcDofD4XA4HA6Hw+FwOBwOh8PhcDgcDodjYuP/Adws9nAoP5jaAAAAAElFTkSuQmCC">' +
+                   '<div class="lsGiro" aria-hidden="true"></div><b>Cargando datos…</b>';
+    document.body.appendChild(el);
+  }
+  function terminar(){
+    if (listo) return; listo = true; soltar();
+    clearTimeout(tCalma);
+    if (el){ el.classList.add('lsFuera'); var e = el; setTimeout(function(){ if (e.parentNode) e.parentNode.removeChild(e); }, 300); }
+  }
+  /* Decide al terminar de leer la página (antes de que se vea): si la pantalla está vacía, el aviso sale
+     de inmediato, sin mostrar antes la pantalla a medio armar; si ya tiene contenido, no sale nunca. */
+  var vig = null;
+  function decidir(){
+    if (listo){ soltar(); return; }
+    if (!vacia()){ soltar(); terminar(); return; }
+    crear(); soltar();
+    vig = setInterval(function(){
+      if (listo){ clearInterval(vig); return; }
+      if (!vacia()) terminar();                          /* ya hay contenido: se quita en el acto */
+      else if (!visto && Date.now() - t0 > 1500) terminar(); /* no consulta la base (p. ej. espera un Excel) */
+    }, 80);
+  }
+  var t0 = Date.now();
+  function inicio(){
+    if (listo) return;
+    pend++; visto = true;
+    clearTimeout(tCalma);
+  }
+  function fin(){
+    if (listo) return;
+    pend = Math.max(0, pend - 1);
+    if (pend === 0){ clearTimeout(tCalma); tCalma = setTimeout(function(){ if (pend === 0) terminar(); }, 600); }
+  }
+  if (window.fetch){
+    var f0 = window.fetch;
+    window.fetch = function(entrada){
+      var u = (entrada && entrada.url) ? entrada.url : entrada;
+      var mio = !listo && esBase(u);
+      if (mio) inicio();
+      var p = f0.apply(this, arguments);
+      if (mio) p.then(function(r){ fin(); return r; }, function(){ fin(); });
+      return p;
+    };
+  }
+  if (window.XMLHttpRequest){
+    var o0 = XMLHttpRequest.prototype.open, s0 = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function(m, u){ this.__lsBase = esBase(u); return o0.apply(this, arguments); };
+    XMLHttpRequest.prototype.send = function(){
+      if (this.__lsBase && !listo){ inicio(); this.addEventListener('loadend', fin); }
+      return s0.apply(this, arguments);
+    };
+  }
+  /* Se decide al terminar de leer la página (antes del primer dibujo completo). Tope: 15 s. */
+  var decidirYa = function(){ setTimeout(decidir, 0); }; /* después de los arranques propios de la página */
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', decidirYa); else decidirYa();
+  setTimeout(terminar, 15000);
+})();</script>
+<!-- ===== fin lives-cargando v1.2 ===== -->
+<!-- ============================================================================
+     LIVES · SESIÓN DEL PORTAL EN LAS HERRAMIENTAS            lives-sesion v5.2 · 2026-10-06
+     Bloque común: es idéntico en todas las herramientas. Si se corrige, se corrige en
+     todas. No depende de nada de la página.
+     · Toma la sesión del portal LIVES (misma dirección github.io, se comparte sola).
+     · v4 · SIN BLOQUEO: la herramienta abre SIEMPRE. Ya no aparece "Abre esto desde el
+       portal". Si hay sesión del portal, todo funciona como antes (nombre, llave,
+       permisos, supervisión). Si no hay sesión (por ejemplo, abierta desde el portal de
+       Sistemas), abre igual y lee con la clave pública.
+     · Toda lectura a Supabase sale con la llave de la persona (si la hay) y la renueva
+       antes de que venza (1 hora) sin chocar con el portal ni con otras pestañas.
+     · El nombre de quien trabaja sale de la sesión: ?usuario= se reescribe con el real.
+       Sin sesión, ?usuario= queda como venga en la dirección.
+     · MODO SUPERVISIÓN (desde v3): Rodrigo (rcamogliano) ve y usa todo, nada se guarda.
+       Christian (ctalepcio) tiene acceso completo. Solo aplica con sesión del portal.
+     · v5 · PUENTE CON EL PORTAL DE SISTEMAS (temporal, riesgo aceptado por Christian el
+       06/10/2026): si no hay sesión del portal LIVES y el link trae ?usuario=Nombre+Apellido,
+       se pide a Supabase (función sesion-sistemas) la sesión de esa persona y la herramienta
+       se recarga una vez ya con su nombre y sus permisos. El nombre no se verifica hasta que
+       Sistemas firme el link. Esa sesión vive solo en la pestaña (no pasa al portal LIVES) y
+       se descarta si el link trae otro nombre. Cuentas excluidas: las define Supabase.
+     · v5.1 · NOMBRE AL DÍA: al abrir, se pregunta a Supabase el nombre vigente de quien
+       tiene la sesión (mi_nombre). Si cambió (p. ej. por los nombres de Sistemas) se corrige
+       la sesión guardada y la pantalla se recarga una sola vez con el nombre nuevo.
+     · v5.2 · PORTAL NUEVO: el puente avisa si la herramienta está abierta dentro de
+       app.lives.com.pe. Solo así Supabase acepta por el puente a Christian y a Rodrigo
+       (Rodrigo siempre en supervisión). Con un link suelto, ellos no entran por el puente.
+     ============================================================================ -->
+<style id="lsCss">
+#lsSup{position:fixed;right:12px;bottom:12px;z-index:2147482000;background:#0E3B36;color:#fff;
+  font-family:Calibri,Arial,sans-serif;font-size:12.5px;font-weight:700;border-radius:999px;padding:7px 14px;
+  box-shadow:0 4px 14px rgba(14,59,54,.25);border:2px solid #10B981;pointer-events:none;opacity:.92;}
+#lsToast{position:fixed;left:50%;bottom:56px;transform:translateX(-50%);z-index:2147482001;background:#B45309;
+  color:#fff;font-family:Calibri,Arial,sans-serif;font-size:14px;font-weight:700;border-radius:10px;
+  padding:11px 18px;box-shadow:0 8px 24px rgba(0,0,0,.25);display:none;max-width:90vw;text-align:center;}
+</style>
+<script id="lsJs">
+(function(){
+  'use strict';
+  if (window.LIVES_SESION) return;                       /* por si el bloque quedara dos veces */
+
+  var SB_URL  = 'https://xxfufpddgoyhbotjmaiy.supabase.co';
+  var SB_KEY  = 'sb_publishable_1g-n6UT70EUlNAo8Lyc04w_jKR4LpXZ';
+  var CLAVE   = 'lives_portal_sesion';                   /* misma llave que usa el portal */
+  var CANDADO = 'lives_sb_renovando';
+  var MOVIL   = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+  var GRACIA  = (MOVIL ? 720 : 60) * 60000;              /* igual que el portal */
+  var fetchBase = window.fetch.bind(window);
+  var yo = Math.random().toString(36).slice(2);
+
+  /* ---------- guardar y leer la sesión (mismo formato que el portal) ---------- */
+  function leerJ(area, k){ try{ return JSON.parse(area.getItem(k) || 'null'); }catch(e){ return null; } }
+  function valida(d){
+    return !!(d && d.token && d.permisos && d.sb && d.sb.access && d.sb.refresh);
+  }
+
+  /* La sesión vigente. Si hay dos copias (la de esta pestaña y el respaldo común) y son
+     de la misma persona, se queda con la llave más nueva: otra pestaña o el portal pudo
+     renovarla, y usar una llave ya renovada cierra la sesión en Supabase. */
+  function sesion(){
+    var s = null, r = null;
+    try{ s = leerJ(sessionStorage, CLAVE); }catch(e){}
+    try{
+      var x = leerJ(localStorage, CLAVE + '_resp');
+      if (x && valida(x.d) && (Date.now() - x.ts) < GRACIA) r = x.d;
+    }catch(e){}
+    if (!valida(s)) s = null;
+    if (!s && r){ s = r; try{ sessionStorage.setItem(CLAVE, JSON.stringify(s)); }catch(e){} }
+    if (s && r && r.usuario === s.usuario && r.sb && (!s.sb || r.sb.exp > s.sb.exp)){
+      s.sb = r.sb;
+      try{ sessionStorage.setItem(CLAVE, JSON.stringify(s)); }catch(e){}
+    }
+    return s;
+  }
+  function guardar(d){
+    try{ sessionStorage.setItem(CLAVE, JSON.stringify(d)); }catch(e){}
+    if (d && d.origen === 'sistemas') return;            /* sesión del puente: solo en esta pestaña */
+    try{ localStorage.setItem(CLAVE + '_resp', JSON.stringify({ d: d, ts: Date.now() })); }catch(e){}
+  }
+  function borrar(){
+    try{ sessionStorage.removeItem(CLAVE); }catch(e){}
+    try{ localStorage.removeItem(CLAVE + '_resp'); }catch(e){}
+  }
+  /* Mientras se usa la herramienta, el respaldo cuenta desde la última actividad. */
+  function refrescarMarca(){
+    var s = sesion(); if (!s || s.origen === 'sistemas') return;
+    try{ localStorage.setItem(CLAVE + '_resp', JSON.stringify({ d: s, ts: Date.now() })); }catch(e){}
+  }
+  setInterval(refrescarMarca, 60000);
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) refrescarMarca(); });
+
+  function equipo(){
+    var n = navigator.userAgent || '';
+    var so = /Android/i.test(n) ? 'Android' : /iPhone|iPad/i.test(n) ? 'iPhone/iPad'
+           : /Windows/i.test(n) ? 'Windows' : /Mac/i.test(n) ? 'Mac' : 'Otro';
+    return so + (window.top === window ? ' · suelta' : '');
+  }
+
+  function pedir(ruta, cuerpo, token, ms){
+    var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var reloj = setTimeout(function(){ if (ctl) ctl.abort(); }, ms || 15000);
+    var cab = { 'Content-Type': 'application/json', apikey: SB_KEY };
+    if (token) cab.Authorization = 'Bearer ' + token;
+    return fetchBase(SB_URL + ruta, { method: 'POST', headers: cab, body: JSON.stringify(cuerpo || {}),
+                                      cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+      .then(function(r){
+        clearTimeout(reloj);
+        return r.text().then(function(t){
+          var j = null; try{ j = t ? JSON.parse(t) : null; }catch(e){}
+          return { status: r.status, ok: r.ok, json: j };
+        });
+      }, function(e){ clearTimeout(reloj); throw e; });
+  }
+  function esperar(ms){ return new Promise(function(ok){ setTimeout(ok, ms); }); }
+
+  /* ---------- llave vigente, renovada sin chocar con otras pestañas ---------- */
+  var renovando = null;
+  function llave(forzar){
+    var s = sesion();
+    if (!s || !s.sb || !s.sb.refresh) return Promise.resolve(null);
+    if (!forzar && s.sb.exp - Date.now() > 60000) return Promise.resolve(s.sb.access);
+    if (renovando) return renovando;
+    var usada = s.sb.refresh;
+    renovando = (function intento(n){
+      var c = leerJ(localStorage, CANDADO);
+      if (c && c.hasta > Date.now() && c.quien !== yo && n < 4){
+        /* Otra pestaña o el portal está renovando: se espera y se usa lo que deje. */
+        return esperar(1500).then(function(){
+          var s2 = sesion();
+          if (s2 && s2.sb && s2.sb.refresh !== usada && s2.sb.exp - Date.now() > 60000) return s2.sb.access;
+          return intento(n + 1);
+        });
+      }
+      try{ localStorage.setItem(CANDADO, JSON.stringify({ quien: yo, hasta: Date.now() + 10000 })); }catch(e){}
+      return pedir('/auth/v1/token?grant_type=refresh_token', { refresh_token: usada })
+        .then(function(r){
+          if (r.ok && r.json && r.json.access_token){
+            var s3 = sesion() || s;
+            s3.sb = { access: r.json.access_token, refresh: r.json.refresh_token,
+                      exp: Date.now() + (Number(r.json.expires_in) || 3600) * 1000 };
+            guardar(s3);
+            return s3.sb.access;
+          }
+          /* Rechazada: puede que otra pestaña la haya renovado un instante antes. */
+          var s4 = sesion();
+          if (s4 && s4.sb && s4.sb.refresh !== usada && s4.sb.exp - Date.now() > 60000) return s4.sb.access;
+          /* v5: si la sesión del puente ya no se puede renovar, se descarta para que la
+             próxima vez que se abra una herramienta el puente la vuelva a pedir. */
+          if (r.status >= 400 && r.status < 500 && s.origen === 'sistemas'){
+            borrar(); try{ sessionStorage.removeItem('lives_puente_recargado'); }catch(e){}
+          }
+          return null;
+        }, function(){ return null; })                                             /* sin señal */
+        .then(function(tk){
+          try{ var c2 = leerJ(localStorage, CANDADO); if (c2 && c2.quien === yo) localStorage.removeItem(CANDADO); }catch(e){}
+          return tk;
+        });
+    })(0).then(function(tk){ renovando = null; return tk; }, function(){ renovando = null; return null; });
+    return renovando;
+  }
+
+  /* ---------- toda lectura a Supabase sale con la llave de la persona ---------- */
+  function conLlave(init, tk){
+    var o = {}, k;
+    init = init || {};
+    for (k in init) o[k] = init[k];
+    var h = {};
+    if (init.headers && typeof init.headers.forEach === 'function' && !(init.headers instanceof Array)){
+      init.headers.forEach(function(v, n){ h[n] = v; });
+    } else if (init.headers){
+      for (k in init.headers) h[k] = init.headers[k];
+    }
+    var tiene = false;
+    for (k in h) if (k.toLowerCase() === 'authorization') tiene = true;
+    if (!tiene && tk) h.Authorization = 'Bearer ' + tk;
+    var tieneKey = false;
+    for (k in h) if (k.toLowerCase() === 'apikey') tieneKey = true;
+    if (!tieneKey) h.apikey = SB_KEY;
+    o.headers = h;
+    return o;
+  }
+
+  /* ---------- MODO SUPERVISIÓN (desde v3) ---------- */
+  /* Solo Rodrigo supervisa. Christian (ctalepcio) tiene acceso completo y guarda en
+     todas las herramientas (lo da Supabase con es_superusuario()). */
+  var SUPERVISORES = ['rcamogliano'];
+  function supervisando(){
+    var s = sesion(); if (!s) return false;
+    return SUPERVISORES.indexOf(String(s.usuario || '').trim().toLowerCase()) !== -1;
+  }
+  /* El bloqueo de verdad lo hace Supabase: para los supervisores, todo pedido que intenta
+     guardar corre en modo "solo lectura" y la base lo rechaza (y los archivos tampoco se
+     suben). Aquí solo se deja la pantalla activa y se avisa con claridad. */
+  var RPC_PUEDE = /(puede|permiso|es_editor|editor_de)/i;
+  function rutaSB(url){ return url.indexOf(SB_URL) === 0 ? url.slice(SB_URL.length).split('?')[0] : ''; }
+  function esRechazoSup(txt){ return /read-only transaction|solo lectura|SUPERVISION/i.test(txt || ''); }
+  var _toastT = null;
+  function avisoSup(txt){
+    function poner(){
+      var t = document.getElementById('lsToast');
+      if (!t){ t = document.createElement('div'); t.id = 'lsToast'; document.body.appendChild(t); }
+      t.textContent = txt; t.style.display = 'block';
+      clearTimeout(_toastT); _toastT = setTimeout(function(){ t.style.display = 'none'; }, 4500);
+    }
+    if (document.body) poner(); else document.addEventListener('DOMContentLoaded', poner);
+  }
+  function marcaSup(){
+    if (!supervisando() || document.getElementById('lsSup')) return;
+    var b = document.createElement('div'); b.id = 'lsSup';
+    b.textContent = '👁️ Modo supervisión · puedes usar todo, nada se guarda';
+    document.body.appendChild(b);
+  }
+  if (document.body) marcaSup(); else document.addEventListener('DOMContentLoaded', marcaSup);
+  function respuesta(cuerpo, estado){
+    return new Response(JSON.stringify(cuerpo), { status: estado,
+      headers: { 'Content-Type': 'application/json' } });
+  }
+
+  /* Para supervisores: "¿puede editar?" pasa a sí, y los rechazos por solo lectura se
+     convierten en un aviso claro. Todo lo demás pasa igual que siempre. */
+  function ajustarSup(r, url, metodo){
+    if (!supervisando()) return r;
+    var ruta = rutaSB(url);
+    if (!ruta) return r;
+    var esRpc = ruta.indexOf('/rest/v1/rpc/') === 0;
+    var fn = esRpc ? ruta.slice('/rest/v1/rpc/'.length) : '';
+    if (!r.ok){
+      return r.clone().text().then(function(t){
+        var sube = ruta.indexOf('/storage/v1/object') === 0 && !/\/object\/(list|sign|info)\//.test(ruta) &&
+                   String(metodo).toUpperCase() !== 'GET';
+        if (esRechazoSup(t) || sube){
+          avisoSup('👁️ Modo supervisión: no se guardó. Estás revisando, los datos no cambian.');
+          return respuesta({ message: 'Modo supervisión: no se guardó (estás revisando).',
+                             error: 'MODO_SUPERVISION', code: 'SUPERVISION' }, r.status);
+        }
+        return r;
+      }, function(){ return r; });
+    }
+    if (!esRpc) return r;
+    return r.clone().text().then(function(t){
+      var x = t.trim();
+      if (RPC_PUEDE.test(fn) && (x === 'false' || x === '')) return respuesta(true, 200);
+      if (x.charAt(0) === '{' && /"(puede|es_editor|editor)[a-z_]*"\s*:\s*false/i.test(x)){
+        try{
+          var o = JSON.parse(x), k, cambio = false;
+          for (k in o) if (/^(puede|es_editor|editor)/i.test(k) && o[k] === false){ o[k] = true; cambio = true; }
+          if (cambio) return respuesta(o, r.status);
+        }catch(e){}
+      }
+      return r;
+    }, function(){ return r; });
+  }
+
+  /* ---------- sin sesión: solo se anota en la consola, nunca se bloquea ---------- */
+  var anotado = false;
+  function sinSesion(){
+    if (anotado) return;
+    anotado = true;
+    try{ console.info('[lives-sesion v5.2] Sin sesión del portal LIVES: se usa la clave pública.'); }catch(e){}
+  }
+
+  window.fetch = function(entrada, init){
+    var url = (typeof entrada === 'string') ? entrada
+            : (entrada && entrada.url) ? entrada.url : String(entrada || '');
+    var metodo = (init && init.method) || (entrada && entrada.method) || 'GET';
+    if (supervisando() && url.indexOf(SB_URL) === 0 && url.indexOf(SB_URL + '/rest/v1/') !== 0){
+      return fetchBase(entrada, init).then(function(r){ return ajustarSup(r, url, metodo); });
+    }
+    if (typeof entrada !== 'string' || url.indexOf(SB_URL + '/rest/v1/') !== 0) return fetchBase(entrada, init);
+    return esperaPuente().then(function(){ return llave(false); }).then(function(tk){
+      if (!tk) sinSesion();
+      return fetchBase(url, conLlave(init, tk)).then(function(r){
+        if (r.status !== 401 || !tk) return ajustarSup(r, url, metodo);
+        /* 401 con llave: venció o la cerraron. Se renueva una vez y se reintenta. */
+        return llave(true).then(function(tk2){
+          if (!tk2){ sinSesion(); return r; }
+          return fetchBase(url, conLlave(init, tk2)).then(function(r2){
+            return ajustarSup(r2, url, metodo);
+          });
+        });
+      });
+    });
+  };
+
+  /* ---------- el nombre sale de la sesión, no de la dirección ---------- */
+  function fijarNombre(s){
+    if (!s || !s.nombre) return;
+    try{
+      var u = new URL(location.href);
+      if (u.searchParams.get('usuario') !== s.nombre){
+        u.searchParams.set('usuario', s.nombre);
+        u.searchParams.delete('nombre');
+        history.replaceState(history.state, '', u.toString());
+      }
+    }catch(e){}
+  }
+
+  /* ---------- v5 · puente con el portal de Sistemas ---------- */
+  var PUENTE_OK = 'lives_puente_recargado';
+  function norm(x){
+    return String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[+._-]/g, ' ')
+             .replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+  function nombreLink(){
+    try{ var u = new URL(location.href); return (u.searchParams.get('usuario') || u.searchParams.get('nombre') || '').trim(); }
+    catch(e){ return ''; }
+  }
+  var pedido = nombreLink();
+  var sx = sesion();
+  /* Sesión del puente de otra persona (computadora compartida): se descarta. */
+  if (sx && sx.origen === 'sistemas' && pedido && norm(pedido) !== norm(sx.nombre)){ borrar(); sx = null; }
+  var puente = null;
+  function enPortalNuevo(){
+    if (window.top === window) return false;
+    var anc = '';
+    try{ var ao = location.ancestorOrigins; if (ao && ao.length) anc = ao[ao.length - 1]; }catch(e){}
+    var ref = ''; try{ ref = document.referrer || ''; }catch(e){}
+    return /^https:\/\/app\.lives\.com\.pe(\/|$)/.test(anc) || /^https:\/\/app\.lives\.com\.pe(\/|$)/.test(ref);
+  }
+  function esperaPuente(){ return puente || Promise.resolve(); }
+  if (!sx && pedido && norm(pedido).length >= 5){
+    var yaRecargo = null; try{ yaRecargo = sessionStorage.getItem(PUENTE_OK); }catch(e){}
+    if (yaRecargo !== norm(pedido)){
+      var raiz = document.documentElement, oculto = false;
+      try{ raiz.style.visibility = 'hidden'; oculto = true; }catch(e){}
+      var mostrar = function(){ if (oculto){ try{ raiz.style.visibility = ''; }catch(e){} oculto = false; } };
+      var tope = setTimeout(mostrar, 6000);                 /* nunca deja la pantalla en blanco */
+      puente = (function(){
+        var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        var reloj = setTimeout(function(){ if (ctl) ctl.abort(); }, 8000);
+        return fetchBase(SB_URL + '/functions/v1/sesion-sistemas', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SB_KEY },
+          body: JSON.stringify({ nombre: pedido, equipo: equipo(), desde: location.pathname, portal_nuevo: enPortalNuevo() }),
+          cache: 'no-store', signal: ctl ? ctl.signal : undefined
+        }).then(function(r){ clearTimeout(reloj); return r.json(); })
+          .then(function(j){
+            if (!j || !j.ok || !j.sesion || !j.sesion.sb){ sinSesion(); mostrar(); clearTimeout(tope); return; }
+            var d = j.sesion;
+            d.sb = { access: d.sb.access, refresh: d.sb.refresh, exp: Date.now() + (Number(d.sb.expira_en) || 3600) * 1000 };
+            d.vsesion = null;
+            guardar(d);
+            try{ sessionStorage.setItem(PUENTE_OK, norm(pedido)); }catch(e){}
+            location.reload();                               /* se vuelve a abrir ya con su sesión */
+          }, function(){ clearTimeout(reloj); sinSesion(); mostrar(); clearTimeout(tope); });
+      })();
+    }
+  }
+
+  /* ---------- al abrir ---------- */
+  var s0 = sesion();
+  if (!s0){
+    sinSesion();
+  } else {
+    fijarNombre(s0);
+    /* Si alguien ejecutó cerrar_todas_las_sesiones(), esta sesión ya no vale: se descarta
+       y la herramienta sigue abierta sin sesión. Sin señal no se hace nada. */
+    pedir('/rest/v1/rpc/version_sesion', {}, null, 8000).then(function(v){
+      if (!v.ok || typeof v.json !== 'number') return;
+      var s = sesion(); if (!s) return;
+      if (s.vsesion === undefined || (s.vsesion !== null && s.vsesion !== v.json)){ borrar(); sinSesion(); return; }
+      if (s.vsesion === null){ s.vsesion = v.json; guardar(s); }
+    }).catch(function(){});
+    /* v5.1: el nombre de la sesión se pone al día con el de la base (una recarga, una vez). */
+    llave(false).then(function(tk){
+      if (!tk) return;
+      return pedir('/rest/v1/rpc/mi_nombre', {}, tk, 8000).then(function(v){
+        if (!v.ok || typeof v.json !== 'string' || !v.json) return;
+        var s = sesion(); if (!s || v.json === s.nombre) return;
+        s.nombre = v.json; guardar(s); fijarNombre(s);
+        var ya = null; try{ ya = sessionStorage.getItem('lives_nombre_al_dia'); }catch(e){}
+        if (ya !== v.json){
+          try{ sessionStorage.setItem('lives_nombre_al_dia', v.json); }catch(e){}
+          location.reload();
+        }
+      });
+    }).catch(function(){});
+    /* Abierta fuera del portal: se anota igual que cuando se abre desde el portal. */
+    if (window.top === window && s0.sb){
+      document.addEventListener('DOMContentLoaded', function(){
+        llave(false).then(function(tk){
+          if (!tk) return;
+          return pedir('/rest/v1/rpc/registrar_apertura',
+            { p_herramienta: (document.title || location.pathname) + ' (suelta)',
+              p_url: location.origin + location.pathname, p_equipo: equipo() }, tk, 10000);
+        }).catch(function(){});
+      });
+    }
+  }
+
+  window.LIVES_SESION = {
+    version: 'lives-sesion v5.2 · 2026-10-06 (sin bloqueo · nombre al día · supervisión · puente Sistemas · portal nuevo)',
+    supervision: function(){ return supervisando(); },
+    actual: function(){ var s = sesion(); return s ? { usuario: s.usuario, nombre: s.nombre, conSupabase: !!s.sb } : null; },
+    llave: function(){ return llave(false); },
+    pedir: function(){ sinSesion(); }       /* se mantiene por compatibilidad: ya no bloquea */
+  };
+})();
+</script>
+<!-- ===== fin lives-sesion v5.2 ===== -->
+<style id="lsLimp2Css">/* lives-limpieza v2 · sin notas, veredictos ni paneles de título arriba */.verdict,#verdict{display:none!important}#ph{display:none!important}</style>
+<style id="pcCss">
+:root{
+  --petrol:#0E3B36;--petrol-2:#12463F;--emer:#10B981;--sage:#0F7A5A;--sage-dark:#0B815E;--slate:#4E6B78;
+  --taupe:#B45309;--rose:#DC2626;--tan:#F59E0B;--warm:#DCE5E2;--warm-light:#F1F6F4;--stone:#5F726C;--card:#fff;
+  --sh:0 1px 3px rgba(14,59,54,.06),0 1px 2px rgba(14,59,54,.04);--sh-h:0 4px 12px rgba(14,59,54,.10);--r:12px;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--warm-light);color:#333;font-family:Calibri,Arial,sans-serif;font-size:14px;line-height:1.45;font-variant-numeric:tabular-nums;}
+.wrap{width:100%;max-width:none;margin:0 auto;padding:18px clamp(16px,2.2vw,52px) 44px;}
+.bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card);border-radius:var(--r);box-shadow:var(--sh);padding:10px 14px;margin-bottom:14px;position:sticky;top:0;z-index:15;}
+.seg{display:inline-flex;background:var(--warm-light);border-radius:8px;padding:3px;gap:2px;}
+.seg button{background:none;border:none;font-family:inherit;font-size:13px;font-weight:700;color:var(--stone);padding:6px 14px;border-radius:6px;cursor:pointer;}
+.seg button.active{background:var(--sage);color:#fff;box-shadow:var(--sh);}
+select,input[type=search]{font-family:inherit;font-size:13.5px;font-weight:700;color:var(--sage);border:1px solid var(--warm);border-radius:8px;padding:7px 12px;background:#fff;}
+input[type=search]{font-weight:400;color:#333;min-width:220px;}
+.btn{font-family:inherit;font-size:13px;font-weight:700;border-radius:8px;padding:8px 14px;cursor:pointer;border:1px solid var(--warm);background:#fff;color:var(--sage);}
+.btn:hover{border-color:var(--sage);}
+.btn.primary{background:var(--sage);color:#fff;border-color:var(--sage);}
+.btn.primary:hover{background:var(--sage-dark);}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+.spacer{margin-left:auto;}
+.ttl{font-size:17px;font-weight:700;color:var(--petrol);}
+.ttl small{font-size:12px;color:var(--stone);font-weight:400;margin-left:6px;}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:14px;}
+.kpi{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);padding:0;position:relative;overflow:hidden;transition:box-shadow .15s,transform .15s;}
+.kpi:hover{box-shadow:var(--sh-h);transform:translateY(-1px);}
+.kpi .banda{display:block;height:5px;background:var(--sage);}
+.kpi.alert .banda{background:var(--rose);} .kpi.money .banda{background:var(--taupe);} .kpi.neutro .banda{background:var(--slate);}
+.kpi .cuerpo{padding:16px 18px 18px;}
+.kpi .l{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--stone);}
+.kpi .row{display:flex;align-items:baseline;gap:10px;margin-top:8px;flex-wrap:wrap;}
+.kpi .v{font-size:44px;font-weight:700;line-height:1;color:var(--sage);letter-spacing:-1.2px;}
+.kpi.money .v{color:var(--taupe);} .kpi.neutro .v{color:var(--slate);} .kpi.alert .v{color:var(--rose);}
+.kpi .d{font-size:13px;font-weight:700;padding:4px 11px;border-radius:20px;}
+.d.up{color:var(--rose);background:#FCEBEB;} .d.down{color:var(--sage);background:#E7F4EF;} .d.flat{color:var(--stone);background:var(--warm-light);}
+.kpi .s{font-size:11.5px;color:var(--stone);margin-top:6px;}
+.kpi .spark{height:26px;margin-top:6px;position:relative;} .kpi .spark canvas{position:absolute;inset:0;}
+.kpi.hero{background:var(--petrol);} .kpi.hero .banda{background:var(--emer);}
+.kpi.hero .l{color:#8FB3AC;} .kpi.hero .v{color:#fff;} .kpi.hero .s{color:#8FB3AC;}
+.kpi.hero .d.up{color:#FFC9C9;background:rgba(220,38,38,.30);} .kpi.hero .d.down{color:#9BE8CB;background:rgba(16,185,129,.22);} .kpi.hero .d.flat{color:#B9CFC9;background:rgba(255,255,255,.12);}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--warm);margin:6px 0 14px;flex-wrap:wrap;}
+.tabs button{background:none;border:none;font-family:inherit;font-size:13.5px;font-weight:700;color:var(--stone);padding:10px 16px;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-1px;}
+.tabs button:hover{color:var(--sage);} .tabs button.active{color:var(--sage-dark);border-bottom-color:var(--sage);}
+.tabpane{display:none;} .tabpane.active{display:block;}
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;margin-bottom:14px;}
+.col12{grid-column:span 12;} .col8{grid-column:span 8;} .col6{grid-column:span 6;} .col4{grid-column:span 4;}
+@media(max-width:1100px){.col8,.col6,.col4{grid-column:span 12;}}
+.panel{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);padding:20px 18px 16px;position:relative;overflow:hidden;}
+.panel .tira{position:absolute;left:0;right:0;top:0;height:4px;background:var(--warm);}
+.panel .tira.resultado{background:var(--sage);} .panel .tira.riesgo{background:var(--rose);} .panel .tira.volumen{background:var(--slate);} .panel .tira.dinero{background:var(--taupe);}
+.panel .pt{font-size:15px;font-weight:700;}
+.panel .ph{font-size:11.5px;color:var(--stone);margin-top:2px;margin-bottom:12px;max-width:130ch;}
+.panel:empty{display:none;}
+.cwrap{position:relative;width:100%;height:clamp(240px,28vh,340px);} .cwrap.tall{height:clamp(280px,36vh,420px);}
+.cwrap canvas{position:absolute;inset:0;}
+@media(min-width:1700px){.cwrap{height:clamp(280px,30vh,400px);}}
+table{width:100%;border-collapse:collapse;font-size:12.5px;}
+th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--stone);border-bottom:1px solid var(--warm);padding:8px 6px;white-space:nowrap;}
+td{padding:8px 6px;border-bottom:1px solid var(--warm-light);}
+td.n,th.n{text-align:right;}
+tr:hover td{background:var(--warm-light);}
+tr.tot td{font-weight:700;border-top:1px solid var(--sage-dark);}
+.tscroll{overflow-x:auto;}
+.st{font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;white-space:nowrap;}
+.st.bue{background:#ECFDF5;color:var(--sage);} .st.ale{background:#FCEBEB;color:var(--rose);} .st.rev{background:#FEF3E2;color:var(--taupe);} .st.low{background:var(--warm-light);color:var(--stone);}
+.lsTope500{font-size:12px;color:#5F726C;text-align:center;padding:8px 0;}
+.vacio{color:var(--stone);font-size:13px;padding:10px 2px;}
+.err{display:none;background:#FBE9E9;border:1px solid var(--rose);border-radius:8px;padding:12px 16px;color:var(--rose);font-size:13px;margin-bottom:14px;}
+.err.on{display:block;}
+.perm{display:none;background:#FEF3E2;border:1px solid var(--tan);border-radius:var(--r);padding:16px 18px;color:#7A4A06;font-size:14px;margin-bottom:14px;}
+.perm.on{display:block;}
+/* tarjetas de clientes */
+.clis{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;}
+.cli{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);padding:0;cursor:pointer;position:relative;overflow:hidden;text-align:left;border:none;font-family:inherit;color:inherit;display:flex;flex-direction:column;transition:box-shadow .15s,transform .15s;}
+.cli:hover{box-shadow:var(--sh-h);transform:translateY(-2px);}
+.cli:focus-visible{outline:3px solid var(--emer);outline-offset:2px;}
+.cli .banda{height:5px;background:var(--sage);display:block;}
+.cli .cc{padding:16px 18px 16px;display:flex;flex-direction:column;flex:1;}
+.cli .nm{font-size:17px;font-weight:700;color:var(--petrol);line-height:1.2;}
+.cli .sg{font-size:11px;font-weight:700;letter-spacing:.6px;color:var(--stone);margin-top:2px;}
+.cli .mt{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;margin-top:14px;}
+.cli .mt .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--stone);}
+.cli .mt .x{font-size:20px;font-weight:700;color:var(--sage);line-height:1.15;}
+.cli .mt .x.r{color:var(--rose);} .cli .mt .x.t{color:var(--taupe);}
+.cli .ft{margin-top:auto;padding-top:12px;font-size:11.5px;color:var(--stone);display:flex;gap:8px;flex-wrap:wrap;}
+.chip{font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;background:var(--warm-light);color:var(--stone);}
+.chip.ok{background:#E7F4EF;color:var(--sage-dark);}
+.rank{list-style:none;margin:0;padding:0;}
+.rank li{display:grid;grid-template-columns:24px 1fr 90px;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--warm-light);}
+.rank .n{width:24px;height:24px;border-radius:50%;background:var(--warm-light);color:var(--stone);font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+.rank .nm{font-size:13px;font-weight:700;}
+.rank .sb{font-size:11px;color:var(--stone);}
+.rank .track{height:7px;background:var(--warm-light);border-radius:4px;margin-top:5px;overflow:hidden;}
+.rank .fill{height:100%;border-radius:4px;width:0;transition:width .9s cubic-bezier(.2,.8,.2,1);}
+.rank .val{text-align:right;font-size:14px;font-weight:700;}
+@media(max-width:900px){
+  .wrap{padding:14px 14px 36px;}
+  .col12,.col8,.col6,.col4{grid-column:span 12;}
+  .kpis{grid-template-columns:repeat(2,1fr);}
+}
+@media(max-width:600px){
+  body{font-size:13.5px;}
+  .bar{position:static;flex-wrap:wrap;padding:8px 10px;gap:8px;}
+  .bar>*{flex:none;} .bar>select{flex:1 1 140px;min-width:0;} .bar>.spacer{display:none;}
+  .btn,select,.seg button,input[type=search]{min-height:44px;font-size:14px;}
+  input[type=search]{min-width:180px;}
+  .spacer{display:none;}
+  .grid,.kpis,.clis{grid-template-columns:1fr!important;} .grid>*{grid-column:span 12!important;}
+  .kpi .v{font-size:36px;} .kpi .spark{display:none;} .kpi:hover,.cli:hover{transform:none;box-shadow:var(--sh);}
+  .cwrap,.cwrap.tall{height:260px;}
+  .tabs{flex-wrap:nowrap;overflow-x:auto;gap:0;} .tabs::-webkit-scrollbar{display:none;} .tabs button{flex:none;padding:12px 14px;font-size:13px;}
+  .panel{padding:18px 14px 14px;overflow-x:auto;}
+  table{min-width:520px;}
+  .panel.plegable.plegado table,.panel.plegable.plegado .tscroll{display:none!important;}
+  .verdet{display:block;width:100%;margin-top:10px;background:#fff;border:1px solid var(--warm);color:var(--sage);border-radius:8px;padding:12px;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;min-height:44px;}
+}
+@media(min-width:601px){.verdet{display:none!important;}}
+@media print{
+  @page{size:A4 landscape;margin:9mm;}
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}
+  .bar,.tabs,.no-print,.err,.verdet{display:none!important;}
+  body{background:#fff!important;} .wrap{padding:0;}
+  .tabpane{display:block!important;}
+  .panel,.kpi{box-shadow:none;border:1px solid var(--warm);break-inside:avoid;}
+  .kpi.hero{background:#fff!important;} .kpi.hero .v{color:var(--sage)!important;} .kpi.hero .l,.kpi.hero .s{color:var(--stone)!important;}
+  .cwrap{height:190px!important;}
+  .panel.plegado table,.panel.plegado .tscroll{display:table!important;}
+}
+
+/* ficha */
+.fdatos{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;}
+.fdato{background:var(--warm-light);border-radius:10px;padding:12px 14px;}
+.fdato .k{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--stone);}
+.fdato .v{font-size:17px;font-weight:700;color:var(--petrol);margin-top:4px;line-height:1.25;}
+.fdato .s{font-size:11.5px;color:var(--stone);margin-top:3px;}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px;align-items:stretch;}
+.ctar{background:#fff;border-radius:var(--r);box-shadow:var(--sh);border:1px solid var(--warm-light);padding:14px 16px 8px 20px;position:relative;overflow:hidden;display:flex;flex-direction:column;}
+.ctar .ctira{position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--warm);}
+.ctar .ctira.resultado{background:var(--sage);} .ctar .ctira.dinero{background:var(--taupe);} .ctar .ctira.riesgo{background:var(--rose);} .ctar .ctira.volumen{background:var(--slate);}
+.ctar .ct{font-size:11.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--stone);}
+.ctar .cs{font-size:11px;color:var(--stone);margin:2px 0 6px;min-height:15px;}
+.cfila{display:grid;grid-template-columns:56px 1fr auto;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--warm-light);}
+.cfila:first-of-type{border-top:none;}
+.cfila .cy{font-size:12.5px;font-weight:700;color:#333;line-height:1.1;}
+.cfila .cy small{display:block;font-size:9.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--taupe);margin-top:2px;}
+.cfila .cv{font-size:22px;font-weight:700;text-align:right;letter-spacing:-.4px;white-space:nowrap;}
+.cfila .cd{text-align:right;min-width:92px;}
+.cfila .cd .d{font-size:11.5px;padding:3px 9px;border-radius:20px;font-weight:700;white-space:nowrap;}
+.cfila .cd small{display:block;font-size:10.5px;color:var(--stone);margin-top:2px;}
+@media(max-width:600px){.cgrid,.fdatos{grid-template-columns:1fr!important;}}
+
+.drop{border:2px dashed var(--warm);border-radius:var(--r);background:var(--card);padding:34px 24px;text-align:center;cursor:pointer;transition:.15s;margin-top:10px;}
+.drop:hover,.drop.over{border-color:var(--sage);background:var(--warm-light);}
+.drop.off{opacity:.5;cursor:not-allowed;}
+.drop .big{font-size:16px;font-weight:700;color:#333;margin-bottom:6px;}
+.drop .sm{font-size:12.5px;color:var(--stone);max-width:90ch;margin:0 auto;}
+#res{display:grid;gap:10px;margin-top:14px;}
+.resu{border:1px solid var(--warm);border-left:5px solid var(--slate);border-radius:10px;padding:10px 14px;background:#fff;}
+.resu.ok{border-left-color:var(--sage);} .resu.mal{border-left-color:var(--rose);background:#FFF7F7;}
+.resu .rn{font-weight:700;font-size:13.5px;word-break:break-all;}
+.resu .rt{font-size:13px;color:#333;margin-top:2px;} .resu.mal .rt{color:var(--rose);}
+.resu .rd{font-size:12.5px;color:var(--stone);margin-top:3px;}
+@media(max-width:600px){.drop{padding:26px 14px;}}
+
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style id="lsSinActCss">/* 12/10/2026: sin botón Actualizar propio; se usa el actualizar del portal */#bAct{display:none!important}</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="bar" id="barIni">
+    <input type="search" id="fBus" autocomplete="off" placeholder="Buscar cliente" aria-label="Buscar cliente">
+  </div>
+  <div class="bar" id="barCli" style="display:none">
+    <button type="button" class="btn" id="bVolver">‹ Clientes</button>
+    <select id="fCli" aria-label="Cliente"></select>
+  </div>
+  <div class="perm" id="perm">Tu usuario no tiene permiso para subir archivos de clientes. Pide el acceso a Christian Talepcio.</div>
+  <div class="err" id="err"><span id="errTx"></span> <button type="button" class="btn" id="bReint">Reintentar</button></div>
+  <div id="vInicio"><div class="clis" id="clis"></div></div>
+  <div id="vCli" style="display:none">
+    <div class="grid">
+      <div class="panel col12"><span class="tira resultado"></span>
+        <div class="pt" id="zonaT">Subir archivos</div>
+        <div class="drop" id="drop" tabindex="0" role="button" aria-label="Elegir archivos para subir">
+          <div class="big">Arrastra aquí los archivos o toca para elegirlos</div>
+          <div class="sm">Se reconocen solos: la matriz de facturas del cliente, el reporte FacturaExpRpt del sistema y el plan de ventas (trae a todos los clientes).<br>
+          Lo que se sube se suma a lo anterior: las facturas que ya estaban no se vuelven a contar. Cualquier otro archivo (PDF, fotos, Word…) se guarda como adjunto del cliente.</div>
+        </div>
+        <input type="file" id="file" multiple hidden>
+        <div id="res"></div>
+      </div>
+      <div class="panel col12"><span class="tira"></span>
+        <div class="pt">Archivos subidos</div>
+        <div class="ph">Del más reciente al más antiguo. Nuevas = filas que no estaban antes en la base.</div>
+        <div id="hist"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script id="pcLector">
+/* Lector de archivos de Perfil de clientes · v1 · 13/10/2026
+   Reconoce por CONTENIDO (no por nombre) tres tipos de Excel:
+   · matriz   : "NAME FABRIC" + "# de Prendas" + "Grupos" (la matriz de Comercial; filas PENDIENTE = programa)
+   · sistema  : "Tipo Doc." + "# de Prendas" + "Grupos" (FacturaExpRpt, descarga del sistema)
+   · plan     : "Plan de Ventas" con meses en la cabecera (todos los clientes, hojas US$ y PRENDAS)
+   Lo demás se guarda como adjunto. */
+var LECTOR = (function(){
+  'use strict';
+  function norm(s){ return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function up(s){ return norm(s).toUpperCase(); }
+  function marcado(v){ var t = up(v); return t === 'X' || t === 'SI' || t === 'SÍ' || t === '1' || t === 'TRUE'; }
+  function pad(n){ return (n < 10 ? '0' : '') + n; }
+  /* fecha sin zona horaria: serial de Excel → AAAA-MM-DD */
+  function fecha(X, v){
+    if (v == null || v === '') return null;
+    if (typeof v === 'number'){
+      var p = X.SSF.parse_date_code(v); if (!p || !p.y) return null;
+      return p.y + '-' + pad(p.m) + '-' + pad(p.d);
+    }
+    if (v instanceof Date) return v.getFullYear() + '-' + pad(v.getMonth() + 1) + '-' + pad(v.getDate());
+    var s = norm(v), m;
+    if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})/))) return m[1] + '-' + m[2] + '-' + m[3];
+    if ((m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/))){ var y = +m[3]; if (y < 100) y += 2000; return y + '-' + pad(+m[2]) + '-' + pad(+m[1]); }
+    return null;
+  }
+  function num(v){ if (typeof v === 'number') return isFinite(v) ? v : null; var s = norm(v).replace(/,/g, ''); if (!s) return null; var n = Number(s); return isFinite(n) ? n : null; }
+  function filas(X, ws){ return X.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null }); }
+  function cabecera(rows, must){
+    for (var i = 0; i < Math.min(rows.length, 30); i++){
+      var r = (rows[i] || []).map(function(x){ return norm(x).toLowerCase(); });
+      if (must.every(function(m){ return r.some(function(c){ return c.indexOf(m) >= 0; }); })) return i;
+    }
+    return -1;
+  }
+  function idx(h, frag){ for (var j = 0; j < h.length; j++) if (h[j].indexOf(frag) >= 0) return j; return -1; }
+  function hidden(ws, r){ var rr = ws['!rows']; return !!(rr && rr[r] && rr[r].hidden); }
+
+  /* ---------------- matriz y sistema (facturas) ---------------- */
+  function leerFacturas(X, ws, rows, hi, tipo){
+    var h = rows[hi].map(function(x){ return norm(x).toLowerCase(); });
+    var c = {
+      cli: idx(h, 'cliente'), doc: idx(h, 'numero docum'), gr: idx(h, 'grupo'), tem: idx(h, 'temporada'),
+      est: idx(h, 'estilo cliente'), liv: h.indexOf('lives'), des: idx(h, 'descripci'), nf: idx(h, 'name fabric'),
+      tel: h.indexOf('tela'), hil: idx(h, 'hilado'), fe: idx(h, 'fecha fact'), q: idx(h, '# de prendas'),
+      imp: idx(h, 'importe'), ag: idx(h, 'agente'), rep: idx(h, 'reposici'), ret: idx(h, 'retra'), td: idx(h, 'tipo doc'), tp: h.indexOf('tipo')
+    };
+    var out = [], ocultas = 0, sinFecha = 0, clientes = {}, agentes = {};
+    for (var i = hi + 1; i < rows.length; i++){
+      var r = rows[i] || [];
+      if (!r.some(function(x){ return x != null && norm(x) !== ''; })) continue;
+      if (hidden(ws, i)){ ocultas++; continue; }               /* filtro activo: solo filas visibles */
+      var q = num(r[c.q]); if (q == null) continue;
+      var dt = fecha(X, r[c.fe]); if (!dt){ sinFecha++; continue; }
+      var doc = up(r[c.doc]), cli = c.cli >= 0 ? up(r[c.cli]) : '';
+      if (cli) clientes[cli] = (clientes[cli] || 0) + 1;
+      if (c.ag >= 0 && up(r[c.ag])) agentes[up(r[c.ag])] = (agentes[up(r[c.ag])] || 0) + 1;
+      out.push({
+        origen: tipo === 'sistema' ? 'sistema' : (doc === 'PENDIENTE' ? 'pendiente' : 'matriz'),
+        cliente: cli, doc: doc, grupo: up(r[c.gr]), temporada: c.tem >= 0 ? up(r[c.tem]) : null,
+        estilo: c.est >= 0 ? norm(r[c.est]) : null, estilo_lives: c.liv >= 0 ? norm(r[c.liv]) : null,
+        descripcion: c.des >= 0 ? up(r[c.des]) : null, tela_nombre: c.nf >= 0 ? up(r[c.nf]).replace(/,\s*$/, '') : null,
+        tela: c.tel >= 0 ? norm(r[c.tel]) : null, hilado: c.hil >= 0 ? up(r[c.hil]) : null,
+        fecha: dt, prendas: q, importe: num(r[c.imp]) || 0, reposiciones: c.rep >= 0 ? (num(r[c.rep]) || 0) : 0,
+        retraso: c.ret >= 0 ? marcado(r[c.ret]) : false, con_marca: c.ret >= 0,
+        tipo_doc: (tipo === 'sistema' && c.tp >= 0 && up(r[c.tp]) === 'M') ? 'M' : 'P'
+      });
+    }
+    /* líneas idénticas dentro del mismo archivo: se numeran para no confundirlas con una repetición al volver a subir */
+    var vistos = {};
+    out.forEach(function(f){
+      var k = [f.origen, f.doc, f.grupo, f.estilo, f.fecha, f.prendas, Math.round(f.importe * 100)].join('|');
+      vistos[k] = (vistos[k] || 0) + 1; f.rep = vistos[k];
+    });
+    var ag = Object.keys(agentes).sort(function(a, b){ return agentes[b] - agentes[a]; })[0] || null;
+    return { filas: out, ocultas: ocultas, sinFecha: sinFecha, clientes: clientes, agente: ag };
+  }
+
+  /* ---------------- plan de ventas ---------------- */
+  var MES3 = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SET','OCT','NOV','DIC'];
+  function leerPlan(X, ws, rows, hoja){
+    var hi = -1, cols = {}, cAnt = -1, cTot = -1, anio = null;
+    for (var i = 0; i < Math.min(rows.length, 15); i++){
+      var cc = {};
+      (rows[i] || []).forEach(function(v, j){
+        var t = up(v).slice(0, 3); if (t === 'SEP') t = 'SET';
+        var k = MES3.indexOf(t); if (k >= 0) cc[j] = k + 1;
+        if (typeof v === 'number' && v > 2000 && v < 2100 && !anio && i < 5) anio = v;
+      });
+      if (Object.keys(cc).length >= 3){ hi = i; cols = cc;
+        (rows[i] || []).forEach(function(v, j){ if (typeof v === 'number' && v > 2000 && v < 2100) cAnt = j; if (up(v) === 'TOTAL') cTot = j; });
+        break; }
+    }
+    if (hi < 0) return null;
+    var out = [], cli = null;
+    for (var r = hi + 1; r < rows.length; r++){
+      var f = rows[r] || [], a0 = up(f[0]), asp = norm(f[1]);
+      if (a0) cli = a0;
+      if (!cli || !asp || cli === 'TOTAL' || cli === 'CLIENTE') continue;
+      Object.keys(cols).forEach(function(j){
+        var v = num(f[j]); if (v == null) return;
+        out.push({ cliente: cli, hoja: hoja, aspecto: asp, mes: cols[j], valor: v });
+      });
+      if (cTot >= 0){ var vt = num(f[cTot]); if (vt != null) out.push({ cliente: cli, hoja: hoja, aspecto: asp, mes: 0, valor: vt }); }
+      if (cAnt >= 0 && asp.toUpperCase() === 'VENTA TOTAL'){ var va = num(f[cAnt]); if (va != null) out.push({ cliente: cli, hoja: hoja, aspecto: 'Año anterior', mes: null, valor: va }); }
+    }
+    return { filas: out, anio: anio };
+  }
+
+  /* ---------------- archivo completo ---------------- */
+  function leer(X, data){
+    var wb = X.read(data, { type: 'array', cellDates: false });
+    var res = { matriz: null, sistema: null, plan: null, hojas: wb.SheetNames.slice() };
+    var plan = [], anioPlan = null;
+    wb.SheetNames.forEach(function(sn){
+      var ws = wb.Sheets[sn], rows = filas(X, ws);
+      var arriba = rows.slice(0, 6).map(function(r){ return (r || []).map(up).join(' '); }).join(' ');
+      if (arriba.indexOf('PLAN DE VENTAS') >= 0){
+        var esUSD = arriba.indexOf('US$') >= 0 || /US\$/i.test(sn);
+        var pl = leerPlan(X, ws, rows, esUSD ? 'USD' : 'PRENDAS');
+        if (pl && pl.filas.length){ plan = plan.concat(pl.filas); if (pl.anio) anioPlan = pl.anio; }
+        return;
+      }
+      var hm = cabecera(rows, ['name fabric', '# de prendas', 'grupos']);
+      if (hm >= 0 && !res.matriz){ res.matriz = leerFacturas(X, ws, rows, hm, 'matriz'); res.matriz.hoja = sn;
+        var a1 = rows[0] && rows[0].find(function(x){ return typeof x === 'number' && x > 40000; });
+        res.matriz.fechaArchivo = a1 ? fecha(X, a1) : null; return; }
+      var hs = cabecera(rows, ['tipo doc', '# de prendas', 'grupos']);
+      if (hs >= 0 && !res.sistema){ res.sistema = leerFacturas(X, ws, rows, hs, 'sistema'); res.sistema.hoja = sn; }
+    });
+    if (plan.length) res.plan = { filas: plan, anio: anioPlan };
+    return res;
+  }
+  return { leer: leer };
+})();
+if (typeof module !== 'undefined') module.exports = LECTOR;
+
+</script>
+<script id="pcJs">
+/* Carga de clientes · v1 · 13/10/2026
+   Comercial sube aquí los archivos de cada cliente. Lo que se sube se ACUMULA: las facturas que ya estaban
+   no se vuelven a contar; cada plan de ventas queda guardado y el perfil usa el más reciente; lo que no se
+   reconoce se guarda como adjunto. El archivo original queda guardado en la carpeta privada perfil-clientes.
+   Puerta única: rpc pc_api(p_accion, p). */
+(function(){
+'use strict';
+var SB_URL = 'https://xxfufpddgoyhbotjmaiy.supabase.co', SB_KEY = 'sb_publishable_1g-n6UT70EUlNAo8Lyc04w_jKR4LpXZ';
+var ST = { clientes: [], sig: null, puede: false };
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]; }); }
+function n0(v){ return v == null || !isFinite(v) ? '—' : Math.round(v).toLocaleString('es-PE'); }
+function dmy(s){ if (!s) return '—'; var m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[3] + '/' + m[2] + '/' + m[1] : s; }
+function hora(s){ var d = new Date(s); return isNaN(d) ? '' : ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+function api(accion, p){
+  return fetch(SB_URL + '/rest/v1/rpc/pc_api', { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SB_KEY },
+    body: JSON.stringify({ p_accion: accion, p: p || {} }) })
+  .then(function(r){ return r.text().then(function(t){ var j = null; try{ j = t ? JSON.parse(t) : null; }catch(e){}
+    if (!r.ok){ var m = (j && (j.message || j.error)) || ('Error ' + r.status); var e = new Error(m); e.permiso = /SIN_PERMISO/.test(m); throw e; }
+    return j; }); });
+}
+function error(m){ $('errTx').textContent = m; $('err').classList.add('on'); }
+function sinError(){ $('err').classList.remove('on'); }
+function cli(sig){ return ST.clientes.filter(function(c){ return c.sigla === sig; })[0]; }
+function prefijos(sig){ return sig === 'VIV' ? ['VIV', 'VI2'] : [sig]; }
+function deCliente(grupo, sig){ var g = String(grupo || '').toUpperCase(); return prefijos(sig).some(function(p){ return g.indexOf(p) === 0; }); }
+
+/* ============================================================== inicio */
+function iniciar(){
+  api('permiso').then(function(p){
+    ST.puede = !!(p && p.puede_subir);
+    if (!p || !p.puede_ver){ $('perm').classList.add('on'); $('vInicio').style.display = 'none'; return; }
+    if (!ST.puede) $('perm').classList.add('on');
+    return api('clientes').then(function(r){
+      ST.clientes = r.clientes || [];
+      $('fCli').innerHTML = ST.clientes.map(function(c){ return '<option value="' + c.sigla + '">' + esc(c.nombre) + '</option>'; }).join('');
+      pintarInicio();
+      var h = decodeURIComponent((location.hash || '').slice(1)).toUpperCase();
+      if (h && cli(h)) abrir(h);
+    });
+  }).catch(function(e){
+    if (e.permiso){ $('perm').classList.add('on'); $('vInicio').style.display = 'none'; return; }
+    error('No se pudo cargar la lista de clientes: ' + e.message + '. Actualiza la pantalla desde el portal.');
+  });
+}
+function pintarInicio(){
+  var q = ($('fBus').value || '').trim().toUpperCase();
+  var l = ST.clientes.filter(function(c){ return !q || c.nombre.indexOf(q) >= 0 || c.sigla.indexOf(q) >= 0; });
+  $('clis').innerHTML = l.length ? l.map(function(c){
+    return '<button type="button" class="cli" data-s="' + c.sigla + '"><span class="banda"></span><div class="cc">' +
+      '<div class="nm">' + esc(c.nombre) + '</div><div class="sg">' + c.sigla + '</div>' +
+      '<div class="mt"><div><div class="k">Archivos subidos</div><div class="x">' + n0(c.archivos) + '</div></div>' +
+      '<div><div class="k">Facturas cargadas</div><div class="x t">' + n0(c.facturas) + '</div></div></div>' +
+      '<div class="ft">' + (c.ultima_carga ? '<span class="chip ok">Última carga ' + dmy(String(c.ultima_carga).slice(0, 10)) + '</span>' : '<span class="chip">Sin archivos todavía</span>') + '</div></div></button>';
+  }).join('') : '<div class="vacio">Ningún cliente coincide con "' + esc(q) + '".</div>';
+}
+
+/* ============================================================== un cliente */
+function abrir(sig){
+  sinError(); ST.sig = sig; var c = cli(sig);
+  $('fCli').value = sig; $('vInicio').style.display = 'none'; $('vCli').style.display = '';
+  $('barIni').style.display = 'none'; $('barCli').style.display = '';
+  $('zonaT').textContent = 'Subir archivos de ' + c.nombre;
+  $('drop').classList.toggle('off', !ST.puede);
+  $('res').innerHTML = '';
+  try{ history.replaceState(null, '', '#' + sig); }catch(e){}
+  historial();
+}
+function volver(){
+  ST.sig = null; $('vCli').style.display = 'none'; $('vInicio').style.display = ''; $('barCli').style.display = 'none'; $('barIni').style.display = '';
+  try{ history.replaceState(null, '', location.pathname + location.search); }catch(e){}
+  api('clientes').then(function(r){ ST.clientes = r.clientes || ST.clientes; pintarInicio(); }).catch(function(){});
+}
+var TIPO = { matriz: 'Matriz de facturas', sistema: 'Reporte del sistema', plan: 'Plan de ventas (todos los clientes)', adjunto: 'Adjunto', heredado: 'Traído del tablero VINCE' };
+function historial(){
+  var sig = ST.sig;
+  $('hist').innerHTML = '<div class="vacio">Cargando…</div>';
+  api('archivos', { sigla: sig }).then(function(r){
+    if (ST.sig !== sig) return;
+    var A = r.archivos || [];
+    if (!A.length){ $('hist').innerHTML = '<div class="vacio">Todavía no se subió ningún archivo para este cliente.</div>'; return; }
+    var h = '<div class="tscroll"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Archivo</th><th class="n">Filas leídas</th><th class="n">Nuevas</th><th>Subido por</th></tr></thead><tbody>';
+    A.forEach(function(a){ h += '<tr><td>' + dmy(String(a.en).slice(0, 10)) + ' ' + hora(a.en) + '</td><td>' + (TIPO[a.tipo] || a.tipo) + '</td><td>' + esc(a.archivo) + '</td><td class="n">' +
+      (a.tipo === 'adjunto' ? '—' : n0(a.leidas)) + '</td><td class="n">' + (a.tipo === 'adjunto' ? '—' : n0(a.nuevas)) + '</td><td>' + esc(a.por || '—') + '</td></tr>'; });
+    $('hist').innerHTML = h + '</tbody></table></div>';
+  }).catch(function(e){ $('hist').innerHTML = '<div class="vacio">No se pudo leer el historial: ' + esc(e.message) + '</div>'; });
+}
+
+/* ============================================================== subir */
+function ruta(sig, nombre){
+  var d = new Date(), p = function(n){ return ('0' + n).slice(-2); };
+  var limpio = String(nombre).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').slice(-120);
+  return (sig || 'TODOS') + '/' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + '_' + limpio;
+}
+function guardarOriginal(file, r){
+  var tk = window.LIVES_SESION ? window.LIVES_SESION.llave() : Promise.resolve(null);
+  return tk.then(function(k){
+    if (!k) throw new Error('necesitas entrar con tu usuario del portal');
+    return fetch(SB_URL + '/storage/v1/object/perfil-clientes/' + r.split('/').map(encodeURIComponent).join('/'), {
+      method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + k, 'x-upsert': 'false', 'Content-Type': file.type || 'application/octet-stream' }, body: file });
+  }).then(function(x){ if (!x.ok) return x.text().then(function(t){ var m = t; try{ m = JSON.parse(t).message || t; }catch(e){} throw new Error('no se pudo guardar el archivo (' + m + ')'); }); return r; });
+}
+function tarjeta(file){
+  var d = document.createElement('div'); d.className = 'resu';
+  d.innerHTML = '<div class="rn">' + esc(file.name) + '</div><div class="rt">Leyendo…</div>';
+  $('res').insertBefore(d, $('res').firstChild);
+  return { ok: function(t, html){ d.classList.add('ok'); d.querySelector('.rt').innerHTML = '<b>' + t + '</b>' + (html ? '<div class="rd">' + html + '</div>' : ''); },
+           mal: function(t){ d.classList.add('mal'); d.querySelector('.rt').innerHTML = '<b>No se guardó.</b> ' + esc(t); },
+           info: function(t){ d.querySelector('.rt').textContent = t; } };
+}
+function leerArchivo(file){ return new Promise(function(ok, mal){ var r = new FileReader(); r.onload = function(e){ ok(new Uint8Array(e.target.result)); }; r.onerror = function(){ mal(new Error('no se pudo leer el archivo')); }; r.readAsArrayBuffer(file); }); }
+function esExcel(n){ return /\.(xlsx|xlsm|xls|csv)$/i.test(n); }
+
+function procesar(file){
+  var sig = ST.sig, c = cli(sig), T = tarjeta(file);
+  if (!ST.puede){ T.mal('tu usuario no tiene permiso para subir archivos.'); return Promise.resolve(); }
+  var lectura = esExcel(file.name) && window.XLSX ? leerArchivo(file).then(function(b){ try{ return LECTOR.leer(XLSX, b); }catch(e){ return null; } }) : Promise.resolve(null);
+  return lectura.then(function(L){
+    /* ---- plan de ventas: sirve para todos los clientes ---- */
+    if (L && L.plan){
+      var filas = L.plan.filas.filter(function(f){ return !(f.valor === 0 && f.mes !== 0 && f.mes != null); }).map(function(f){ f.anio = L.plan.anio; return f; });
+      if (!L.plan.anio) throw new Error('no encontré el año del plan de ventas en las primeras filas');
+      T.info('Plan de ventas ' + L.plan.anio + ' · guardando…');
+      var r = ruta(null, file.name);
+      return guardarOriginal(file, r).then(function(){
+        return api('subir_plan', { archivo: file.name, ruta: r, tamano: file.size, filas: filas, detalle: { anio: L.plan.anio, hojas: L.hojas } });
+      }).then(function(x){
+        var nr = (x.no_reconocidos || []);
+        T.ok('Plan de ventas ' + L.plan.anio + ' guardado para todos los clientes.', n0(x.filas) + ' cifras. El perfil de cada cliente usa ahora este plan (el anterior queda guardado).' +
+          (nr.length ? '<br>No se reconoció a: ' + nr.map(esc).join(', ') + '. Avisa a Christian para agregarlo a la lista de clientes.' : ''));
+      });
+    }
+    /* ---- matriz o reporte del sistema ---- */
+    var F = L && (L.matriz || L.sistema);
+    if (F){
+      var tipo = L.matriz ? 'matriz' : 'sistema';
+      var mias = F.filas.filter(function(f){ return deCliente(f.grupo, sig); }), otras = F.filas.length - mias.length;
+      if (!mias.length){
+        var cl = Object.keys(F.clientes || {}).join(', ');
+        throw new Error('este archivo no tiene grupos de ' + c.nombre + ' (deberían empezar con ' + prefijos(sig).join(' o ') + ')' + (cl ? '. Según el archivo es de: ' + cl : '') + '. Súbelo en la tarjeta de ese cliente.');
+      }
+      var det = { hoja: F.hoja, agente: F.agente || null, fecha_archivo: F.fechaArchivo || null, filas_ocultas: F.ocultas, sin_fecha: F.sinFecha, otros_clientes: otras };
+      var pend = mias.filter(function(f){ return f.origen === 'pendiente'; });
+      if (pend.length){
+        var antes = {}; pend.forEach(function(p){ antes[p.grupo] = 0; });
+        mias.forEach(function(f){ if (f.origen === 'matriz' && antes[f.grupo] != null) antes[f.grupo] += f.prendas; });
+        det.antes = antes; det.fecha_matriz = F.fechaArchivo || new Date().toISOString().slice(0, 10);
+      }
+      T.info((tipo === 'matriz' ? 'Matriz de facturas' : 'Reporte del sistema') + ' · ' + mias.length + ' filas de ' + c.nombre + ' · guardando…');
+      var r2 = ruta(sig, file.name);
+      return guardarOriginal(file, r2).then(function(){
+        return api('subir_facturas', { sigla: sig, tipo: tipo, archivo: file.name, ruta: r2, tamano: file.size, filas: mias.map(function(f){ var o = {}; for (var k in f) if (k !== 'cliente') o[k] = f[k]; return o; }), detalle: det });
+      }).then(function(x){
+        var extra = [];
+        if (pend.length) extra.push(pend.length + ' filas PENDIENTE (programa) para medir caídas');
+        if (otras) extra.push(otras + ' filas de otros clientes no se tomaron');
+        if (F.ocultas) extra.push(F.ocultas + ' filas ocultas por el filtro del Excel no se tomaron');
+        if (F.sinFecha) extra.push(F.sinFecha + ' filas sin fecha no se tomaron');
+        T.ok(tipo === 'matriz' ? 'Se guardó la matriz de facturas.' : 'Se guardó el reporte del sistema.',
+          n0(x.nuevas) + ' filas nuevas · ' + n0(x.repetidas) + ' ya estaban y no se volvieron a contar.' + (extra.length ? '<br>' + extra.join(' · ') + '.' : ''));
+      });
+    }
+    /* ---- cualquier otro archivo: adjunto ---- */
+    T.info('Guardando como adjunto…');
+    var r3 = ruta(sig, file.name);
+    return guardarOriginal(file, r3).then(function(){
+      return api('adjunto', { sigla: sig, archivo: file.name, ruta: r3, tamano: file.size, detalle: { tipo_mime: file.type || null, hojas: L ? L.hojas : null } });
+    }).then(function(){ T.ok('Guardado como adjunto de ' + c.nombre + '.', 'No es un formato que se lea solo: queda en Archivos del perfil para descargarlo. Si quieres que se analice, pásaselo a Christian.'); });
+  }).catch(function(e){ T.mal(e.message || String(e)); });
+}
+function subir(files){
+  if (!files || !files.length || !ST.sig) return;
+  sinError();
+  var l = [].slice.call(files), i = 0;
+  (function sig(){ if (i >= l.length){ historial(); return; } procesar(l[i++]).then(sig); })();
+}
+
+/* ============================================================== eventos */
+document.addEventListener('click', function(e){ var c = e.target.closest('.cli'); if (c) abrir(c.getAttribute('data-s')); });
+$('bVolver').addEventListener('click', volver);
+$('fCli').addEventListener('change', function(){ abrir(this.value); });
+$('fBus').addEventListener('input', pintarInicio);
+$('bReint').addEventListener('click', function(){ sinError(); iniciar(); });
+var dz = $('drop'), fi = $('file');
+dz.addEventListener('click', function(){ if (ST.puede) fi.click(); });
+dz.addEventListener('keydown', function(e){ if ((e.key === 'Enter' || e.key === ' ') && ST.puede){ e.preventDefault(); fi.click(); } });
+fi.addEventListener('change', function(){ subir(fi.files); fi.value = ''; });
+['dragenter', 'dragover'].forEach(function(ev){ dz.addEventListener(ev, function(e){ e.preventDefault(); if (ST.puede) dz.classList.add('over'); }); });
+['dragleave', 'drop'].forEach(function(ev){ dz.addEventListener(ev, function(e){ e.preventDefault(); dz.classList.remove('over'); }); });
+dz.addEventListener('drop', function(e){ if (ST.puede && e.dataTransfer.files.length) subir(e.dataTransfer.files); });
+iniciar();
+})();
+
+</script>
+<!-- ===== lives-actualizar v2 · 2026-10-12 · aviso de versión nueva OBLIGATORIO (común a todas las herramientas).
+     Revisa cada 3 minutos (y al volver a la pestaña) si el archivo publicado cambió. Si cambió, tapa la
+     herramienta con un aviso que no se puede cerrar: un solo botón, "Actualizar". En celular ocupa toda la
+     pantalla; en computadora sale al centro. No aparece mientras la persona está escribiendo (espera a que
+     pase 20 s sin teclear) y, antes de recargar, pide a la herramienta que guarde su borrador si tiene uno.
+     Solo pide el encabezado del archivo (HEAD), no lo descarga. ===== -->
+<style id="lsActCss">
+#lsAct{position:fixed;inset:0;z-index:2147483000;display:none;align-items:center;justify-content:center;
+  background:rgba(14,59,54,.78);padding:16px;font-family:Calibri,Arial,sans-serif}
+#lsAct .lsActCaja{background:#fff;border-radius:12px;border-top:4px solid #10B981;box-shadow:0 10px 30px rgba(0,0,0,.25);
+  max-width:440px;width:100%;padding:26px 24px 22px;text-align:center;color:#1a1a1a}
+#lsAct .lsActIco{width:56px;height:56px;margin:0 auto 12px;border-radius:50%;background:#E7F6EF;color:#0F7A5A;
+  display:flex;align-items:center;justify-content:center;font-size:30px;line-height:1}
+#lsAct h2{margin:0 0 8px;font-size:21px;color:#0E3B36}
+#lsAct p{margin:0 0 18px;font-size:15.5px;line-height:1.45;color:#3d4f4b}
+#lsActSi{display:block;width:100%;background:#0F7A5A;color:#fff;border:none;border-radius:10px;font-family:inherit;
+  font-size:17px;font-weight:700;padding:14px 16px;min-height:52px;cursor:pointer}
+#lsActSi:hover{background:#0B6349}
+#lsActSi:focus{outline:3px solid #10B981;outline-offset:2px}
+@media (max-width:640px){
+  #lsAct{padding:0;background:#fff}
+  #lsAct .lsActCaja{max-width:none;height:100%;border-radius:0;box-shadow:none;border-top:6px solid #10B981;
+    display:flex;flex-direction:column;justify-content:center;padding:32px 22px}
+  #lsAct h2{font-size:24px}
+  #lsAct p{font-size:17px}
+  #lsActSi{font-size:19px;min-height:58px}
+}
+@media print{#lsAct{display:none!important}}
+</style>
+<script id="lsActJs">(function(){
+  'use strict';
+  if (window.__lsAct) return; window.__lsAct = true;
+  if (!/^https?:$/.test(location.protocol)) return;
+  var url = location.origin + location.pathname, base = null, pendiente = false, ultimaTecla = 0;
+  /* Mientras la persona escribe no se interrumpe: se espera a que pasen 20 s sin teclear. */
+  ['input','keydown','change'].forEach(function(ev){
+    document.addEventListener(ev, function(e){ if (!e.target || !e.target.closest || !e.target.closest('#lsAct')) ultimaTecla = Date.now(); }, true);
+  });
+  function firma(){
+    return fetch(url, { method: 'HEAD', cache: 'no-store' }).then(function(r){
+      if (!r.ok) return null;
+      return r.headers.get('etag') || r.headers.get('last-modified') || null;
+    }, function(){ return null; });
+  }
+  function recargar(){
+    /* Si la herramienta guarda borrador (p. ej. el formulario de auditoría), se guarda antes de recargar. */
+    if (ultimaTecla){
+      ['guardarBorradorAhora','guardarBorradorPeriodico','guardarBorrador'].some(function(n){
+        try { if (typeof window[n] === 'function'){ window[n](); return true; } } catch(e){}
+        return false;
+      });
+    }
+    setTimeout(function(){ location.reload(); }, 150);
+  }
+  function aviso(){
+    if (document.getElementById('lsAct') && document.getElementById('lsAct').style.display === 'flex') return;
+    if (Date.now() - ultimaTecla < 20000){ setTimeout(aviso, 5000); return; }
+    var d = document.getElementById('lsAct');
+    if (!d){
+      d = document.createElement('div'); d.id = 'lsAct';
+      d.setAttribute('role', 'alertdialog'); d.setAttribute('aria-modal', 'true'); d.setAttribute('aria-labelledby', 'lsActT');
+      d.innerHTML = '<div class="lsActCaja"><div class="lsActIco" aria-hidden="true">&#8635;</div>' +
+        '<h2 id="lsActT">Hay una versión nueva</h2>' +
+        '<p>Esta herramienta se actualizó. Toca <b>Actualizar</b> para seguir trabajando con la versión nueva.</p>' +
+        '<button id="lsActSi" type="button">Actualizar</button></div>';
+      (document.body || document.documentElement).appendChild(d);
+      document.getElementById('lsActSi').onclick = recargar;
+    }
+    d.style.display = 'flex';
+    document.documentElement.style.overflow = 'hidden';
+    var b = document.getElementById('lsActSi'); if (b) b.focus();
+  }
+  /* No se puede cerrar: Escape no hace nada, el foco no sale del aviso y si algo lo quita vuelve a salir. */
+  document.addEventListener('keydown', function(e){
+    var d = document.getElementById('lsAct'); if (!d || d.style.display !== 'flex') return;
+    if (e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); }
+    if (e.key === 'Tab'){ e.preventDefault(); var b = document.getElementById('lsActSi'); if (b) b.focus(); }
+  }, true);
+  setInterval(function(){
+    if (!pendiente) return;
+    var d = document.getElementById('lsAct');
+    if (!d || d.style.display !== 'flex') aviso();
+  }, 1500);
+  function revisar(){
+    if (document.hidden || pendiente) return;
+    firma().then(function(f){
+      if (!f) return;
+      if (base === null){ base = f; return; }
+      if (f !== base){ pendiente = true; aviso(); }
+    });
+  }
+  revisar();
+  setInterval(revisar, 3 * 60000);
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) revisar(); });
+})();</script>
+<!-- ===== fin lives-actualizar v2 ===== -->
+<!-- ===== lives-franja v6.1 · 2026-10-09 · sin franja de estado arriba y sin la palabra "Supabase" (común a todas las herramientas).
+     1) La tira de estado de arriba ("Datos al…", "En vivo…", nombre del usuario, fechas) y el aviso "Datos en vivo" NO se ven:
+        el contenido empieza arriba del todo. Si la tira trae botones o enlaces (Volver, Atrás, Cambiar, navegación),
+        solo quedan esos, en una línea delgada.
+     2) Al terminar de cargar sale un aviso flotante "Actualizado · hh:mm" que desaparece solo (no ocupa espacio).
+        Si la carga falla, sale un aviso rojo flotante con el motivo. Si el usuario solo puede consultar y la pantalla
+        no lo dice en otro lado, sale un aviso flotante de solo consulta.
+     3) En lo que se ve en pantalla no aparece el nombre del proveedor de la base: "· Supabase" y "fuente: Supabase" se quitan,
+        y en los textos de ayuda "Supabase" se lee "la base de datos". El código, los guardados y los datos no cambian.
+     4) v4 · Si la herramienta se abre dentro del portal LIVES antiguo y ese portal todavía es la versión vieja (sin el aviso
+        de mudanza, bloque lsMudJs), se recarga el portal completo para que la persona vea el aviso de mudanza.
+        Solo pasa al abrir la herramienta (todavía sin nada escrito), como máximo una vez cada 10 minutos;
+        en el portal nuevo de Sistemas no hace nada.
+     5) v5 · Botones de exportar, imprimir, actualizar, Excel o HTML que flotaban encima de la barra de filtros pasan a esa
+        barra (si no hay barra, se crea una). La barra con filtros queda fija al bajar y, mientras está fija, los botones de
+        acción se esconden; al subir vuelven. Las barras que solo tienen botones suben con la página.
+        El dato "N registros · datos al …" ya no se muestra. Acabados no se toca.
+     6) v6 · Los demás grupos de botones que flotaban arriba (pestañas como "Mejoras / Reporte", menús de vista,
+        "Volver") también entran a la barra de filtros; si no hay barra, se les crea una. Al cambiar de pestaña, las
+        pestañas pasan a la barra de la vista abierta. Lo que ya está dentro de una tarjeta no se mueve. Una barra de
+        filtros muy alta (más de 180 px) no se queda fija, para no tapar media pantalla. ===== -->
+<style id="lsFrCss">
+@media screen{
+.lsSinBarra{padding:2px 12px 0!important;gap:2px 8px!important;font-size:12px!important;line-height:1.25!important;min-height:0!important}
+.lsSinBarra.lsFrVacia,.lsSinBarra .lsFrOc,.lsSinBarra .lsFrTx{display:none!important}
+.lsSinBarra a,.lsSinBarra button,.lsSinBarra>* a,.lsSinBarra>* button{padding:1px 8px!important;font-size:12px!important;line-height:1.25!important;border-width:1px!important;border-radius:6px!important;min-height:0!important;height:auto!important;margin:0!important}
+.lsSinBarra select,.lsSinBarra input{padding:0 6px!important;font-size:12px!important;height:20px!important;min-height:0!important}
+.avisoVivo:not(.error){display:none!important}
+.avisoVivo.error{padding:3px 10px!important;font-size:12px!important;line-height:1.3!important;margin-bottom:6px!important;border-radius:6px!important}
+.avisoVivo button{padding:1px 8px!important;font-size:12px!important;min-height:0!important}
+.hstate-emb{display:none!important}
+#lsFrToast{position:fixed;top:6px;right:12px;z-index:2147483000;max-width:min(460px,calc(100vw - 24px));font-family:Calibri,Arial,sans-serif;
+  font-size:12.5px;line-height:1.35;padding:5px 12px;border-radius:9px;box-shadow:0 4px 14px rgba(14,59,54,.18);color:#fff;background:#0F7A5A;
+  opacity:0;transform:translateY(-6px);transition:opacity .25s,transform .25s;pointer-events:none}
+#lsFrToast.ver{opacity:1;transform:none}
+#lsFrToast.err{background:#B42318;pointer-events:auto;padding-right:28px}
+#lsFrToast.cons{background:#B45309}
+#lsFrToast b{font-weight:700}
+#lsFrToast .x{position:absolute;right:8px;top:3px;cursor:pointer;font-weight:700}
+}
+@media print{#lsFrToast{display:none!important}}
+</style>
+<script id="lsFrJs">(function(){try{
+  var ERR=/error|no se pudo|sin conexi|desconectad|fall[oó]|no carg|sin acceso/i;
+  var PERM=/solo consulta|sin permiso|no tien[ea]s? permiso|solo para consultar|modo consulta|solo lectura/i;
+  var CARGA=/cargando|conectando|leyendo|actualizando|enviando/i;
+  function strip(){return document.querySelector('.lsSinBarra');}
+  function oculto(e){if(e.style&&e.style.display==='none')return true;try{return getComputedStyle(e).display==='none';}catch(x){return false;}}
+  function esCtl(e){return /^(A|BUTTON|SELECT|INPUT)$/.test(e.tagName)||!!e.querySelector('a,button,select,input');}
+  /* 1) La tira solo conserva botones y enlaces; si no queda ninguno visible, desaparece. */
+  function esCtlPropio(e){return /^(A|BUTTON|SELECT|INPUT)$/.test(e.tagName);}
+  /* Dentro de un bloque con botón (ej. nombre + Cambiar), el texto se oculta y queda solo el botón. */
+  function limpiaCont(c){Array.prototype.slice.call(c.childNodes).forEach(function(n){
+      if(n.nodeType===3){if(n.nodeValue.trim()){var sp=document.createElement('span');sp.className='lsFrTx';c.insertBefore(sp,n);sp.appendChild(n);}}
+      else if(n.nodeType===1&&!esCtlPropio(n)&&!n.classList.contains('lsFrTx')){if(esCtl(n))limpiaCont(n);else if(!n.classList.contains('lsFrOc'))n.classList.add('lsFrOc');}});}
+  function ordenar(){var s=strip();if(!s)return;var vis=0;
+    Array.prototype.forEach.call(s.children,function(e){
+      if(esCtl(e)){if(e.classList.contains('lsFrOc'))e.classList.remove('lsFrOc');if(!esCtlPropio(e))limpiaCont(e);if(!oculto(e))vis++;}
+      else if(!e.classList.contains('lsFrOc'))e.classList.add('lsFrOc');});
+    if(s.classList.contains('lsFrVacia')!==(vis===0))s.classList.toggle('lsFrVacia',vis===0);}
+  /* 2) Avisos flotantes. */
+  var T=null,tm=null,listo=false,consDicho=false,t0=Date.now();
+  function toast(html,cls,ms){if(!document.body)return;if(!T){T=document.createElement('div');T.id='lsFrToast';T.setAttribute('role','status');document.body.appendChild(T);}
+    clearTimeout(tm);T.className=cls||'';T.innerHTML=html;void T.offsetWidth;T.classList.add('ver');
+    if(cls==='err'){var x=document.createElement('span');x.className='x';x.textContent='✕';x.onclick=function(){T.classList.remove('ver');};T.appendChild(x);}
+    if(ms)tm=setTimeout(function(){T.classList.remove('ver');},ms);}
+  function esc(t){return String(t).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function textoEstado(){var s=strip(),t='';
+    if(s)Array.prototype.forEach.call(s.querySelectorAll('.lsFrOc,.lsFrTx'),function(e){if(!oculto(e))t+=' '+(e.textContent||'');});
+    return t.replace(/\s+/g,' ').trim();}
+  var errMostrado='';
+  function revisar(){
+    var t=textoEstado(),av=document.querySelector('#avisoVivo,.avisoVivo');
+    if(t&&ERR.test(t)){if(errMostrado!==t){errMostrado=t;toast('<b>Atención:</b> '+esc(t.slice(0,200)),'err');}return;}
+    if(errMostrado){errMostrado='';if(T)T.classList.remove('ver');}
+    if(!consDicho&&t&&PERM.test(t)){var cuerpo=document.body.innerText||'';
+      if(!PERM.test(cuerpo)){consDicho=true;toast('<b>Solo consulta:</b> tu usuario puede ver esta pantalla, pero no registrar ni modificar.','cons',6000);return;}
+      consDicho=true;}
+    if(!listo){var cargando=(t&&CARGA.test(t))||(av&&!/\b(ok|error)\b/.test(av.className));
+      if(document.readyState==='complete'&&(!cargando||Date.now()-t0>25000)){listo=true;
+        if(av&&/\berror\b/.test(av.className))return;
+        var d=new Date(),h=('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+        setTimeout(function(){if(!errMostrado)toast('Actualizado · '+h,'',2500);},consDicho&&T&&T.classList.contains('ver')?6200:300);}}}
+  /* 3) Sin "Supabase" en lo visible. */
+  var R=[[/\s*[·|,-]\s*fuente\s*:\s*Supabase\b/gi,''],[/\bfuente\s*:\s*Supabase\b\s*/gi,'Fuente: base de datos LIVES '],
+         [/\s*[·|]\s*Supabase\b/g,''],[/\bSupabase\s*[·|]\s*/g,''],[/\s*\(\s*Supabase\s*\)/gi,''],
+         [/\b(en|a|de|desde|con)\s+Supabase\b/gi,'$1 la base de datos'],[/\bSupabase\b/gi,'la base de datos']];
+  function limpia(t){var x=t;R.forEach(function(r){x=x.replace(r[0],r[1]);});return x.replace(/de la la base/gi,'de la base').replace(/en la la base/gi,'en la base');}
+  var SKIP=/^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|CODE|PRE)$/;
+  function nodo(n){if(n.nodeValue&&/upabase/i.test(n.nodeValue)){var p=n.parentNode;if(p&&!SKIP.test(p.nodeName)){var v=limpia(n.nodeValue);if(v!==n.nodeValue)n.nodeValue=v;}}}
+  function arbol(r){if(!r)return;if(r.nodeType===3){nodo(r);return;}if(r.nodeType!==1||SKIP.test(r.nodeName))return;
+    if(!/upabase/i.test(r.textContent||'')&&!/upabase/i.test(r.title||''))return;
+    if(/upabase/i.test(r.title||''))r.title=limpia(r.title);
+    var w=document.createTreeWalker(r,4,null),t;while((t=w.nextNode()))nodo(t);
+    Array.prototype.forEach.call(r.querySelectorAll('[title*="upabase"]'),function(e){e.title=limpia(e.title);});}
+  if(/upabase/i.test(document.title))document.title=limpia(document.title);
+  var pend=[],prog=false;
+  function correr(){prog=false;var l=pend;pend=[];l.forEach(arbol);ordenar();revisar();}
+  function inicio(){arbol(document.body);ordenar();revisar();
+    new MutationObserver(function(ms){var mio=true;ms.forEach(function(m){var n=m.target;if(!(T&&(n===T||T.contains(n))))mio=false;
+        if(m.type==='characterData')pend.push(m.target);else for(var i=0;i<m.addedNodes.length;i++)pend.push(m.addedNodes[i]);});
+      if(mio)return;if(!prog){prog=true;Promise.resolve().then(correr);}}).observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['class','style']});
+    window.addEventListener('load',function(){setTimeout(revisar,50);});
+    var k=0,iv=setInterval(function(){revisar();if(listo||++k>60)clearInterval(iv);},500);}
+  /* 4) Portal antiguo con versión vieja abierta: se recarga entero para que aparezca el aviso de mudanza. */
+  try{
+    if (window.top !== window){
+      var tp = window.top.location;   /* si el portal es de otro dominio (app.lives.com.pe) esto falla y no se hace nada */
+      if (tp.hostname === location.hostname && /^\/lives-portal\//.test(tp.pathname) &&
+          !window.top.document.getElementById('lsMudJs')){
+        /* Una sola vez cada 10 minutos: si el portal aún no tiene la versión nueva publicada, no se recarga en bucle. */
+        var ss = window.top.sessionStorage, ult = +(ss.getItem('lsMudRecarga') || 0);
+        if (Date.now() - ult > 600000){ ss.setItem('lsMudRecarga', String(Date.now())); window.top.location.reload(); }
+      }
+    }
+  }catch(e){}
+  if(document.body)inicio();else document.addEventListener('DOMContentLoaded',inicio);
+}catch(e){}})();</script>
+<style id="lsBaCss">
+@media screen{
+.lsBaOc{display:none!important}
+.lsAcc{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
+.lsBarra{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-start;background:#fff;border:1px solid #DCE5E2;border-radius:12px;padding:8px 12px;margin:0 0 12px;box-shadow:0 1px 3px rgba(14,59,54,.06)}
+.lsBarra>.lsAcc:only-child{margin-left:auto}
+.lsTop{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px;padding:0 0 10px;border-bottom:1px solid #E6EEEB;width:100%;flex-basis:100%}
+.lsTop>*{margin:0!important}
+.lsBarra>*{margin-top:0!important;margin-bottom:0!important}
+.lsBaFijo{position:sticky!important;top:0;z-index:30}
+.lsBaSuelta{position:static!important}
+.lsPegada .lsAccBtn{display:none!important}
+button.lsBtn,a.lsBtn{font-family:inherit;font-size:13px;font-weight:700;border-radius:8px;padding:8px 14px;cursor:pointer;border:1px solid #DCE5E2;background:#fff;color:#0F7A5A;min-height:36px;line-height:1.2;text-decoration:none;display:inline-flex;align-items:center;gap:6px;box-shadow:none}
+button.lsBtn:hover,a.lsBtn:hover{border-color:#0F7A5A;background:#fff}
+button.lsBtn.pri,button.lsBtn.primary{background:#0F7A5A;color:#fff;border-color:#0F7A5A}
+button.lsBtn.pri:hover,button.lsBtn.primary:hover{background:#0B815E;color:#fff}
+button.lsBtn:disabled{opacity:.5;cursor:not-allowed}
+}
+</style>
+<script id="lsBaJs">(function(){try{
+  /* v6.1 · Botones de exportar, imprimir, actualizar y similares: van en la barra de filtros (no flotando arriba).
+     Grupos de botones sueltos arriba (pestañas como "Mejoras / Reporte", "Volver", menús de vista) también
+     entran a la barra de filtros; si la pantalla no tiene barra, se les crea una. Al cambiar de pestaña,
+     las pestañas pasan a la barra de la vista que queda abierta.
+     La barra con filtros queda fija al bajar (si no es muy alta); los botones de acción se esconden mientras
+     está fija y vuelven al subir. El dato de "N registros · datos al …" no se muestra.
+     No cambia cálculos, datos ni guardados: solo ubica botones que ya existen. Acabados (Lady) no se toca. */
+  if(/\/formulario-acabados\//.test(location.pathname))return;
+  var SIN_GRUPOS=/\/Tienda-lives\/(index\.html)?$/i.test(location.pathname);
+  var ACC=/^(exportar|descargar|imprimir|actualizar|recargar|compartir|copiar enlace)\b|\b(excel|pdf|html|csv)\b/i;
+  var EST=/(datos al \d|le[ií]d[oa]s? a las|datos de las \d|actualizad[oa] a las|[uú]ltima (lectura|actualizaci)|datos en vivo|en vivo ·)/i;
+  var BARRA='.bar,.toolbar,.filtros,.filters,.fbar,.filterbar,.barra,.controles,.controls,.fbarra,.fpanel,[class*="barra"]:not(.lsSinBarra):not(.lsBarra),[class*="filtro"],[class*="filter"],[class*="toolbar"]';
+  var CTL='select,input:not([type=hidden]):not([type=file]):not([type=button]):not([type=submit])';
+  var FUERA='dialog,[role=dialog],.modal,.ficha-card,.mbox,.ventana,#lsFrToast,#lsAct,#lsMud,.lsSinBarra';
+  var ALTO_FIJO=180;
+  function vis(e){if(!e||!e.getBoundingClientRect)return false;var r=e.getBoundingClientRect();if(r.width<=0||r.height<=0)return false;var s=getComputedStyle(e);return s.visibility!=='hidden'&&s.display!=='none';}
+  function txt(e){return (e.textContent||'').replace(/\s+/g,' ').trim();}
+  function limpio(t){return t.replace(/^[^A-Za-zÁÉÍÓÚáéíóúÑñ0-9]+/,'');}
+  function esAcc(b){if(b.closest('#lsFrToast,#lsAct,#lsMud,.lsSinBarra .lsFrOc'))return false;var t=limpio(txt(b));return t.length>0&&t.length<40&&ACC.test(t);}
+  function poner(e,c){if(!e.classList.contains(c))e.classList.add(c);}
+  function hayCtl(e){return Array.prototype.some.call(e.querySelectorAll('a,button,'+CTL+',textarea,canvas,img,table,svg'),vis);}
+  function enBarra(e){var b=e.closest(BARRA);return b&&!b.closest('.lsSinBarra')?b:null;}
+  function externa(b){var p=b.parentElement&&b.parentElement.closest(BARRA);while(p&&!p.closest('.lsSinBarra')&&vis(p)){b=p;p=b.parentElement&&b.parentElement.closest(BARRA);}return b;}
+  function barraFiltros(){var c=Array.prototype.filter.call(document.querySelectorAll(BARRA),function(b){return vis(b)&&!b.closest(FUERA)&&!b.closest('.modal:not(.on):not(.show):not(.abierto)')&&Array.prototype.some.call(b.querySelectorAll(CTL),vis);}).map(externa);
+    c.sort(function(a,b){return a.getBoundingClientRect().top-b.getBoundingClientRect().top;});return c[0]||null;}
+  function contScroll(e){var p=e.parentElement;while(p&&p!==document.body){var o=getComputedStyle(p).overflowY;if(o==='auto'||o==='scroll')return p;p=p.parentElement;}return null;}
+  /* ¿todo lo que se ve dentro de e son botones o enlaces? (sin campos, tablas, gráficos ni texto suelto) */
+  function soloBotones(e){
+    if(e.querySelector(CTL+',textarea,table,canvas,iframe,video'))return false;
+    var w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT,null,false),n;
+    while((n=w.nextNode())){if(!n.nodeValue.trim())continue;var p=n.parentElement;if(!p||!vis(p))continue;if(!p.closest('button,a,[role=tab]'))return false;}
+    return Array.prototype.some.call(e.querySelectorAll('button,a,[role=tab]'),vis);}
+  function estilo(b){try{var s=getComputedStyle(b);return [s.backgroundColor,s.color,s.borderTopColor,s.borderTopWidth].join('|');}catch(e){return '';}}
+  function grande(e){return Array.prototype.some.call(e.matches&&e.matches('button,a,[role=tab]')?[e]:e.querySelectorAll('button,a,[role=tab]'),function(x){return vis(x)&&x.getBoundingClientRect().height>56;});}
+  function grupoDe(b){
+    var g=b,p=b.parentElement;
+    while(p&&p!==document.body&&!p.matches(BARRA)&&!p.matches('main,header,section,article,form,.wrap,.container,.contenedor')&&soloBotones(p)&&p.getBoundingClientRect().height<90){g=p;p=p.parentElement;}
+    if(g===b){var q=b.parentElement;if(!q||!soloBotones(q))return null;}
+    return g;}
+  /* ¿e ya está dentro de una tarjeta o caja con fondo o borde? entonces no está "en el aire" */
+  function enCaja(e){var fondo=getComputedStyle(document.body).backgroundColor,p=e.parentElement;
+    while(p&&p!==document.body&&p!==document.documentElement){var s=getComputedStyle(p);
+      var bg=s.backgroundColor;if(bg&&bg!=='rgba(0, 0, 0, 0)'&&bg!=='transparent'&&bg!==fondo)return true;
+      if(parseFloat(s.borderTopWidth)>0&&s.borderTopStyle!=='none'&&parseFloat(s.borderLeftWidth)>0)return true;
+      if(s.boxShadow&&s.boxShadow!=='none')return true;p=p.parentElement;}
+    return false;}
+  var F=null,FIX=null,MOV=[];
+  function cajaTop(f){var c=f.querySelector(':scope > .lsTop');if(!c){c=document.createElement('div');c.className='lsTop';f.insertBefore(c,f.firstChild);}return c;}
+  function aCasa(m){if(!m.bar){m.bar=document.createElement('div');m.bar.className='lsBarra';m.casa.parentNode.insertBefore(m.bar,m.casa.nextSibling);}
+    if(m.g.parentNode!==m.bar)m.bar.appendChild(m.g);m.bar.style.display='';}
+  function ubicar(m,f){
+    if(f&&!f.contains(m.g)){cajaTop(f).appendChild(m.g);if(m.bar)m.bar.style.display='none';}
+    else if(!f)aCasa(m);}
+  function arreglar(){
+    var f=barraFiltros(),tope=f?f.getBoundingClientRect().top:260;
+    /* 1) dato de estado arriba */
+    Array.prototype.forEach.call(document.querySelectorAll('div,span,p,small'),function(e){
+      if(e.classList.contains('lsBaOc')||e.children.length>3||!vis(e))return;var t=txt(e);
+      if(t.length>160||!EST.test(t)||hayCtl(e))return;if(e.getBoundingClientRect().top>tope+4)return;
+      if(e.closest('.lsAcc,.lsBarra,.lsTop,'+BARRA))return;poner(e,'lsBaOc');});
+    /* 0) grupos ya movidos que quedaron escondidos (cambio de pestaña): pasan a la barra visible o vuelven a su sitio */
+    MOV.forEach(function(m){var casaVis=m.casa.parentNode&&vis(m.casa.parentNode);
+      if(!casaVis){if(m.g.previousSibling!==m.casa)m.casa.parentNode.insertBefore(m.g,m.casa.nextSibling);if(m.bar)m.bar.style.display='none';return;}
+      if(!vis(m.g)||m.g.previousSibling===m.casa||(f&&m.bar&&m.g.parentNode===m.bar))ubicar(m,f);});
+    /* 2) botones de exportar/imprimir/actualizar flotando encima de la barra */
+    var sueltos=Array.prototype.filter.call(document.querySelectorAll('button,a.btn,a[class*="btn"]'),function(b){
+      if(!vis(b)||!esAcc(b)||b.closest('.lsAcc,.lsBarra,.lsTop'))return false;if(f&&f.contains(b))return false;
+      if(b.closest(FUERA))return false;
+      var r=b.getBoundingClientRect();if(f)return r.bottom<=tope+2;
+      return r.top<200&&!enBarra(b)&&!b.closest('.panel,.card,.kpi,form,table');});
+    if(sueltos.length){
+      var dest=f,caja;
+      if(!dest){var ref=sueltos[0];var fila=ref.parentElement;dest=document.createElement('div');dest.className='lsBarra';fila.parentNode.insertBefore(dest,fila);caja=dest;}
+      else{caja=dest.querySelector(':scope > .lsAcc');if(!caja){caja=document.createElement('span');caja.className='lsAcc';dest.appendChild(caja);}}
+      sueltos.forEach(function(b){var antes=b.parentElement,e0=estilo(b);caja.appendChild(b);if(estilo(b)!==e0)poner(b,'lsBtn');
+        var p=antes,n=0;while(p&&p!==document.body&&n<4){if(p.contains(dest))break;if(!hayCtl(p)&&p.getBoundingClientRect().height<140){poner(p,'lsBaOc');p=p.parentElement;n++;}else break;}});
+    }
+    /* 2b) otros grupos de botones sueltos arriba (pestañas, Volver, vistas): a la barra; si no hay barra, se les crea una */
+    if(!SIN_GRUPOS){
+      var lim=f?f.getBoundingClientRect().top:220,vistos=[];
+      Array.prototype.forEach.call(document.querySelectorAll('button,a,[role=tab]'),function(b){
+        if(!vis(b)||!txt(b)||b.closest('.lsAcc,.lsBarra,.lsTop,aside,nav,[class*="side"],[class*="menu"],form,table,'+FUERA))return;
+        if(f&&f.contains(b))return;if(enBarra(b))return;
+        var s=getComputedStyle(b);if(s.position==='fixed'||s.position==='absolute')return;
+        var r=b.getBoundingClientRect();if(r.bottom>lim+2||r.top>320)return;
+        if(b.getBoundingClientRect().height>56)return;var g=grupoDe(b);if(!g||vistos.indexOf(g)>=0)return;if(grande(g))return;if(enCaja(g))return;
+        if(g.closest('aside,nav,[class*="side"],[class*="menu"],'+FUERA))return;
+        vistos.push(g);});
+      vistos.forEach(function(g){if(MOV.some(function(m){return m.g===g;}))return;
+        var casa=document.createElement('span');casa.className='lsCasa';casa.style.display='none';g.parentNode.insertBefore(casa,g);
+        var m={g:g,casa:casa,bar:null};MOV.push(m);ubicar(m,f);});
+    }
+    /* 3) barra con filtros fija (si no es muy alta); botones de acción marcados para esconderse mientras está fija */
+    if(f){
+      Array.prototype.forEach.call(f.querySelectorAll('button,a'),function(b){if(esAcc(b))poner(b,'lsAccBtn');});
+      var alta=f.getBoundingClientRect().height>ALTO_FIJO;
+      if(alta){f.classList.remove('lsBaFijo');f.classList.remove('lsPegada');F=null;}
+      else{
+        if(getComputedStyle(f).position==='static'){poner(f,'lsBaFijo');var bg=getComputedStyle(f).backgroundColor;if(!bg||bg==='rgba(0, 0, 0, 0)'||bg==='transparent')f.style.backgroundColor=getComputedStyle(document.body).backgroundColor||'#F1F6F4';}
+        F=f;FIX=contScroll(f);}
+    }
+    /* barras pegajosas que solo tienen botones (sin filtros): que suban con la página */
+    Array.prototype.forEach.call(document.querySelectorAll(BARRA),function(b){if(b===f||!vis(b))return;var s=getComputedStyle(b).position;
+      if((s==='sticky'||s==='fixed')&&!Array.prototype.some.call(b.querySelectorAll(CTL),vis)&&Array.prototype.some.call(b.querySelectorAll('button,a'),esAcc))poner(b,'lsBaSuelta');});
+    pegada();
+  }
+  function pegada(){if(!F||!F.isConnected)return;var top=parseFloat(getComputedStyle(F).top)||0,base=FIX?FIX.getBoundingClientRect().top:0,desp=FIX?FIX.scrollTop:(window.scrollY||document.documentElement.scrollTop);
+    var en=desp>4&&(F.getBoundingClientRect().top-base)<=top+1.5;if(en!==F.classList.contains('lsPegada'))F.classList.toggle('lsPegada',en);}
+  document.addEventListener('scroll',function(){pegada();},true);window.addEventListener('resize',function(){pegada();luego();});
+  document.addEventListener('click',function(){setTimeout(function(){try{arreglar();}catch(e){}},30);},true);
+  var t=null;function luego(){if(t)return;t=setTimeout(function(){t=null;try{arreglar();}catch(e){}},250);}
+  function inicio(){luego();new MutationObserver(function(ms){for(var i=0;i<ms.length;i++){if(ms[i].addedNodes.length||ms[i].removedNodes.length){luego();return;}}}).observe(document.body,{childList:true,subtree:true});
+    window.addEventListener('load',luego);var k=0,iv=setInterval(function(){luego();if(++k>20)clearInterval(iv);},700);}
+  if(document.body)inicio();else document.addEventListener('DOMContentLoaded',inicio);
+  window.__lsBa={arreglar:arreglar,MOV:MOV,F:function(){return F;},bf:barraFiltros};
+}catch(e){}})();</script>
+<!-- ===== fin lives-franja v6.1 ===== -->
+<script id="lsLimp2Js">(function(){try{if(window.top!==window.self)document.documentElement.classList.add("lsEnPortal");}catch(e){document.documentElement.classList.add("lsEnPortal");}var re=/^\s*¿\s*(C[oó]mo|Qu[eé] (hace|pasa))/i,p=0;function f(){p=0;var d=document.querySelectorAll("details");for(var i=0;i<d.length;i++){var s=d[i].querySelector("summary");if(s&&re.test(s.textContent))d[i].style.display="none";}}f();document.addEventListener("DOMContentLoaded",f);try{new MutationObserver(function(){if(!p){p=1;setTimeout(f,60);}}).observe(document.documentElement,{childList:true,subtree:true});}catch(e){}})();</script>
+</body>
+</html>
