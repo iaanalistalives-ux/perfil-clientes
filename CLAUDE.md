@@ -25,6 +25,7 @@ Perfil comercial de cada cliente (EFI, THY, PAK, VINCE y los demás de `pc_clien
   - Leer: `permiso`, `clientes`, `perfil`, `archivos`.
   - Registrar: `subir_facturas`, `subir_plan`, `adjunto`.
 - Tablas propias: `pc_clientes`, `pc_cargas`, `pc_facturas`, `pc_plan`, `pc_datos`; función `pc_tipo_pedido`. Lee además `ops` (pedidos), `segundas_detalle` y `ctex_seg_det`. Al 21/10/2026: 4 cargas, 166 facturas y 387 filas de plan.
+- `segundas_detalle` se conserva a propósito hasta que se migre al sistema de la empresa: esta herramienta la lee para las segundas por año. No borrarla ni vaciarla. Su último dato es del 10/10/2026 (semana 41) y hoy nada la actualiza (Segundas Interno se retiró el 15/10/2026), así que las segundas por año de 2026 quedan hasta esa fecha.
 - Archivos: bucket privado `perfil-clientes` (`<SIGLA o TODOS>/<AAAAMMDD>-<HHMMSS>_<nombre>`). El original se sube primero y luego se registra; si falla el registro puede quedar un archivo suelto.
 
 ## Quién la usa
