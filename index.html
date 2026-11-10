@@ -1294,7 +1294,7 @@ function tabPedidos(P){
     panel('col4', 'volumen', 'Promedio de prendas por pedido', 'Pedido = un grupo con una PO. Promedio = prendas ÷ pedidos de ese tipo. Reposición = la PO dice REPO; muestra = TOP, SAMPLE o SMS.', cv('cPedTipo')) +
     panel('col12', 'volumen', 'Pedidos por tipo', '% prendas = prendas del tipo ÷ prendas pedidas en el año. ' + Y + ' va hasta hoy, ' + (Y - 1) + ' es el año completo.', tabla(cols, filas, tot)) +
     panel('col12', '', 'Detalle de pedidos', 'Un pedido por fila, del más reciente al más antiguo. Fecha = primera OP creada del pedido.',
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px" class="no-print"><input type="search" id="pedQ" placeholder="Grupo, PO o estilo" value="' + esc(ST.q) + '">' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px" class="no-print"><input type="search" id="pedQ" placeholder="Buscar estilo" value="' + esc(ST.q) + '">' +
       '<select id="pedT"><option value="">Todos los tipos</option>' + tipos.map(function(t){ return '<option' + (ST.ft === t ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select></div><div id="pedLista"></div>') +
     '</div>';
   el.innerHTML = h;
@@ -1306,7 +1306,7 @@ function tabPedidos(P){
 }
 function listaPedidos(P){
   var q = (ST.q || '').trim().toUpperCase(), t = ST.ft, fil = !!(q || t);
-  var l = P.ped.filter(function(x){ return (!t || x.t === t) && (!q || (x.g + ' ' + x.po + ' ' + (x.est || '')).toUpperCase().indexOf(q) >= 0); })
+  var l = P.ped.filter(function(x){ return (!t || x.t === t) && (!q || (x.est || '').toUpperCase().indexOf(q) >= 0); })
     .sort(function(a, b){ return a.f < b.f ? 1 : a.f > b.f ? -1 : 0; });
   var ver = fil ? l : l.slice(0, LIM);
   var h = tabla([{ t: 'Fecha' }, { t: 'Grupo' }, { t: 'PO' }, { t: 'Tipo' }, { t: 'Estilos' }, { t: 'OPs', n: 1 }, { t: 'Prendas', n: 1 }],
